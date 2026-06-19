@@ -253,7 +253,24 @@ export default function ChatPanel({ onBuildStart, onBuildEnd, onGitHubImport, on
         stream: true,
         onToken: (token) => {
           setMessages((prev) => 
-            prev.map(m => m.id === asstMsgId ? { ...m, content: m.content + token } : m)
+            prev.map(m => {
+              if (m.id === asstMsgId) {
+                let currentRaw = (m as any)._raw || "";
+                currentRaw += token;
+                
+                // If it's a multi-file JSON codeblock or HTML codeblock, hide it
+                let display = currentRaw;
+                if (display.includes("```")) {
+                  const parts = display.split("```");
+                  display = parts[0] + "\n\n*(Building app code...)*";
+                } else if (display.startsWith("{") || display.startsWith("<!DOCTYPE") || display.startsWith("<html")) {
+                  display = "*(Building app code...)*";
+                }
+
+                return { ...m, content: display, _raw: currentRaw };
+              }
+              return m;
+            })
           );
         }
       });
@@ -302,8 +319,14 @@ export default function ChatPanel({ onBuildStart, onBuildEnd, onGitHubImport, on
           replyText = rawOutput;
         }
       }
+      
       const newHistory: ConversationMessage[] = [...conversationHistory, { role: "user", content: promptText }, { role: "assistant", content: rawOutput }];
       onConversationUpdate(newHistory);
+      
+      // FIX: Ensure the chat UI displays the clean replyText instead of the raw code
+      setMessages((prev) => 
+        prev.map(m => m.id === asstMsgId ? { ...m, content: replyText } : m)
+      );
 
       if (!codeIsValid && buildMode !== "browser-extension" && buildMode !== "react-app" && buildMode !== "import-edit") {
         // If it's a web-app and no code was detected, append a warning to the streamed message
