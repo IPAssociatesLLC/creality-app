@@ -227,7 +227,13 @@ export default function ChatPanel({ onBuildStart, onBuildEnd, onGitHubImport, on
 
     setInput(""); setShowSuggestions(false);
     const userMsg: ChatMessage = { id: `msg-${Date.now()}`, role: "user", content: promptText, timestamp: new Date(), status: "done" };
-    setMessages((prev) => [...prev, userMsg]); setLastPrompt(promptText); setThinking(true); onBuildStart();
+    const asstMsgId = `msg-${Date.now()}-asst`;
+    const initialAsstMsg: ChatMessage = { id: asstMsgId, role: "assistant", content: "", timestamp: new Date(), status: "done" };
+    
+    setMessages((prev) => [...prev, userMsg, initialAsstMsg]); 
+    setLastPrompt(promptText); 
+    setThinking(true); 
+    onBuildStart();
 
     // Save user message to Supabase
     if (conversationId) {
@@ -244,6 +250,12 @@ export default function ChatPanel({ onBuildStart, onBuildEnd, onGitHubImport, on
         projectContext: projectContext || "",
         conversationSummary,
         conversationId: conversationId || undefined,
+        stream: true,
+        onToken: (token) => {
+          setMessages((prev) => 
+            prev.map(m => m.id === asstMsgId ? { ...m, content: m.content + token } : m)
+          );
+        }
       });
       if (!rawOutput) throw new Error("AI returned empty output.");
 
@@ -309,11 +321,11 @@ export default function ChatPanel({ onBuildStart, onBuildEnd, onGitHubImport, on
       const newHistory: ConversationMessage[] = [...conversationHistory, { role: "user", content: promptText }, { role: "assistant", content: rawOutput }];
       onConversationUpdate(newHistory);
 
-      if (codeIsValid || buildMode === "browser-extension" || buildMode === "react-app") {
-        setMessages((prev) => [...prev, { id: `msg-${Date.now()}-r`, role: "assistant", content: replyText, timestamp: new Date(), status: "done" }]);
-      } else {
-        // Show full non-code response as a regular message with a warning note
-        setMessages((prev) => [...prev, { id: `msg-${Date.now()}-r`, role: "assistant", content: `**Note:** The AI response didn't contain valid HTML code. This may indicate the model misunderstood your request. Try being more specific about what you want to build.\n\n${replyText}`, timestamp: new Date(), status: "done" }]);
+      if (!codeIsValid && buildMode !== "browser-extension" && buildMode !== "react-app" && buildMode !== "import-edit") {
+        // If it's a web-app and no code was detected, append a warning to the streamed message
+        setMessages((prev) => 
+          prev.map(m => m.id === asstMsgId ? { ...m, content: m.content + `\n\n**Note:** I couldn't detect valid HTML code in this response. Try being more specific.` } : m)
+        );
       }
     } catch (err: unknown) {
       let errMsg = err instanceof Error ? err.message : "Something went wrong.";

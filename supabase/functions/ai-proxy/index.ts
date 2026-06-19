@@ -197,14 +197,22 @@ serve(async (req: Request) => {
 
     const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
     if (authError || !user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      if (stream && typeof result !== "string") {
+      // If streaming, result is a Response object from the LLM
+      // We return it directly. 
+      return new Response(result.body, {
+        headers: { ...corsHeaders, "Content-Type": result.headers.get("Content-Type") || "text/event-stream" }
+      });
+    }
+
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
         status: 401,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     const body = await req.json();
-    const { modelId, prompt, messages, buildMode, systemPrompt, projectContext, summary, conversationId } = body;
+    const { modelId, prompt, messages, buildMode, systemPrompt, projectContext, summary, conversationId, stream } = body;
 
     if (!modelId || !prompt) {
       return new Response(JSON.stringify({ error: "Missing modelId or prompt" }), {
@@ -335,13 +343,13 @@ serve(async (req: Request) => {
       case "gpt-4o":
       case "deepseek-v3":
       case "grok-3":
-        result = await callOpenAICompatible(apiKey, baseUrl, modelId, augmentedSystem, finalMessages, prompt);
+        result = await callOpenAICompatible(apiKey, baseUrl, modelId, augmentedSystem, finalMessages, prompt, stream);
         break;
       case "claude-3.5-sonnet":
-        result = await callAnthropic(apiKey, baseUrl, augmentedSystem, finalMessages, prompt);
+        result = await callAnthropic(apiKey, baseUrl, augmentedSystem, finalMessages, prompt, stream);
         break;
       case "gemini-2.0-flash":
-        result = await callGemini(apiKey, augmentedSystem, finalMessages, prompt);
+        result = await callGemini(apiKey, augmentedSystem, finalMessages, prompt, stream);
         break;
       default:
         return new Response(JSON.stringify({ error: `Unknown model: ${modelId}` }), {
@@ -374,7 +382,7 @@ serve(async (req: Request) => {
 async function callOpenAICompatible(
   apiKey: string, baseUrl: string, modelId: string,
   systemPrompt: string, messages: { role: string; content: string }[], userPrompt: string,
-): Promise<string> {
+, stream?: boolean): Promise<string | any> {
   const modelMap: Record<string, string> = {
     "gpt-4o": "gpt-4o",
     "deepseek-v3": "deepseek-chat",
@@ -407,81 +415,10 @@ async function callOpenAICompatible(
 
   if (!res.ok) {
     const errBody = await res.text();
-    throw new Error(`API error (${res.status}): ${errBody.slice(0, 300)}`);
-  }
-
-  const data = await res.json();
-  return data.choices?.[0]?.message?.content || "";
-}
-
-async function callAnthropic(
-  apiKey: string, baseUrl: string, system: string,
-  messages: { role: string; content: string }[], userPrompt: string,
-): Promise<string> {
-  const allMessages = [
-    ...messages.map((m) => ({ role: m.role, content: m.content })),
-    { role: "user", content: userPrompt },
-  ];
-
-  const res = await fetch(`${baseUrl}/messages`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: "claude-3-5-sonnet-20241022",
-      system,
-      messages: allMessages,
-      max_tokens: 8192,
-    }),
-  });
-
-  if (!res.ok) {
-    const errBody = await res.text();
-    throw new Error(`Claude API error (${res.status}): ${errBody.slice(0, 300)}`);
-  }
-
-  const data = await res.json();
-  return data.content?.[0]?.text || "";
-}
-
-async function callGemini(
-  apiKey: string, systemInstruction: string,
-  messages: { role: string; content: string }[], userPrompt: string,
-): Promise<string> {
-  const geminiContents = [
-    ...messages.map((m) => ({
-      role: m.role === "assistant" ? "model" : "user",
-      parts: [{ text: m.content }],
-    })),
-    { role: "user", parts: [{ text: userPrompt }] },
-  ];
-
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        systemInstruction: {
-          role: "user",
-          parts: [{ text: systemInstruction }],
-        },
-        contents: geminiContents,
-        generationConfig: {
-          maxOutputTokens: 8192,
-          temperature: 0.7,
-        },
-      }),
-    }
-  );
-
-  if (!res.ok) {
-    const errBody = await res.text();
     throw new Error(`Gemini API error (${res.status}): ${errBody.slice(0, 300)}`);
   }
+
+  if (stream) return res;
 
   const data = await res.json();
   return data.candidates?.[0]?.content?.parts?.[0]?.text || "";

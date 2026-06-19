@@ -480,7 +480,7 @@ FINAL RULES
 ───────────────────────────────────────
 - Return ONLY a JSON code block: \`\`\`json { "manifest.json": "...", "popup/popup.html": "...", ... } \`\`\`
 - ALL file content values must be properly JSON-escaped
-- Do NOT include any explanation before or after the JSON code block
+- You may explain your process before the code block.
 - When iterating: return the FULL updated file set, not just modified files
 - The JSON must be valid and parseable — double-check ALL escape sequences
 - Make the extension genuinely useful and production-ready`;
@@ -507,15 +507,16 @@ REQUIRED FILES (always include):
 - src/index.css — @tailwind directives + global styles + CSS custom properties
 - src/vite-env.d.ts — Vite type references
 
-GENERATE 2-5 ESSENTIAL FILES based on app complexity:
-CRITICAL: Do not exceed 5-7 total files. Generating too many files will cause the Edge Function to time out.
+GENERATE A COMPLETE MULTI-FILE REACT ARCHITECTURE.
+CRITICAL: You MUST break down your code into multiple files. Never cram everything into App.tsx or index.html.
+CRITICAL: Do not exceed 10-12 total files to prevent timeouts, but ALWAYS use at least 4-5 files (e.g. App.tsx, index.css, and 2-3 components).
 CRITICAL: ALL imports MUST use relative paths (e.g. './' or '../'). DO NOT use '@/' path aliases, as they are not supported by the preview bundler.
 
-- src/components/ — Reusable components
-- src/pages/ — Page components
-- src/hooks/ — Custom hooks
+- src/components/ — Reusable UI components (buttons, headers, cards)
+- src/pages/ — Full page layouts
+- src/hooks/ — Custom React hooks
 - src/lib/ — Utility modules
-- src/data/ — Mock data files
+- src/data/ — Mock data or state files
 
 ───────────────────────────────────────
 DESIGN SYSTEM — DARK THEME
@@ -714,10 +715,19 @@ When the project has multiple files:
 ───────────────────────────────────────
 OUTPUT FORMAT
 ───────────────────────────────────────
-For multi-file projects: same JSON format as react-app mode
-\`\`\`json { "src/App.tsx": "...", "src/components/Header.tsx": "...", ... } \`\`\`
+For ALL React apps, multi-file projects, and IMPORT/EDIT mode, you MUST use this exact JSON format:
+\`\`\`json
+{
+  "src/App.tsx": "import React from 'react';...",
+  "src/components/Header.tsx": "export function Header() {...}",
+  "src/index.css": "@tailwind base;...",
+  "package.json": "{...}"
+}
+\`\`\`
+CRITICAL: The output MUST contain a single JSON object with your files. Keys are file paths, values are the raw code strings.
+You may briefly explain your thought process or design decisions BEFORE providing the JSON code block.
 
-For single-file HTML apps: standard HTML output
+For simple single-file HTML apps (only if specifically requested as a basic web page), output standard HTML:
 \`\`\`html <!DOCTYPE html> ... \`\`\`
 
 For browser extensions: extension JSON format
@@ -774,6 +784,8 @@ interface ApiCallOptions {
   projectContext?: string;
   conversationSummary?: string;
   conversationId?: string;
+  stream?: boolean;
+  onToken?: (token: string) => void;
 }
 
 export async function generateCode({ config, prompt, conversationHistory, buildMode = "web-app", onStep, projectContext, conversationSummary, conversationId }: ApiCallOptions): Promise<string> {
@@ -822,6 +834,7 @@ export async function generateCode({ config, prompt, conversationHistory, buildM
       projectContext: projectContext || "",
       summary: conversationSummary || "",
       conversationId: conversationId || "",
+      stream: stream || !!onToken,
     })
   });
 
@@ -836,18 +849,31 @@ export async function generateCode({ config, prompt, conversationHistory, buildM
     throw new Error(errMsg);
   }
 
-  const data = await res.json();
-
   onStep?.("Receiving generated code...");
 
-  const content = data?.content || "";
+  if (stream || !!onToken) {
+    if (!res.body) throw new Error("No response body for streaming");
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let fullText = "";
 
-  // Log context pruning info for debugging
-  if (data?.contextPruned) {
-    console.log(`CreAIlity: Context pruned — kept ${data.messagesKept}/${data.messagesTotal} messages`);
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value, { stream: true });
+      fullText += chunk;
+      onToken?.(chunk);
+    }
+    
+    return extractHtmlCode(fullText);
+  } else {
+    const data = await res.json();
+    const content = data?.content || "";
+    if (data?.contextPruned) {
+      console.log(`CreAIlity: Context pruned — kept ${data.messagesKept}/${data.messagesTotal} messages`);
+    }
+    return extractHtmlCode(content);
   }
-
-  return extractHtmlCode(content);
 }
 
 function extractHtmlCode(text: string): string {
