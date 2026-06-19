@@ -64,7 +64,7 @@ export default function WorkspacePage() {
   }, [project?.importedFiles, project?.generatedCode]);
 
   const hasSandbox = sandboxHtml !== null;
-  const [showSandbox, setShowSandbox] = useState(hasSandbox);
+
 
   const idFromUrl = searchParams.get("id");
 
@@ -340,22 +340,20 @@ export default function WorkspacePage() {
 
   const previewCode = useMemo(() => {
     if (viewingVersionCode) return viewingVersionCode;
-    if (showSandbox && sandboxHtml) return sandboxHtml;
     if (activeViewingFile === "generated" && project?.generatedCode) return project.generatedCode;
     if (activeViewingFile && activeViewingFile !== "generated" && project?.importedFiles) {
       const file = project.importedFiles.find((f) => f.name === activeViewingFile);
       if (file) return file.content;
     }
     return project?.generatedCode ?? null;
-  }, [viewingVersionCode, showSandbox, sandboxHtml, activeViewingFile, project?.generatedCode, project?.importedFiles]);
+  }, [viewingVersionCode, activeViewingFile, project?.generatedCode, project?.importedFiles]);
 
   const isExtensionFile = useMemo(() => {
     if (activeViewingFile === "generated" || viewingVersionCode) return false;
-    if (showSandbox) return false;
     if (!activeViewingFile) return false;
     const ext = activeViewingFile.split(".").pop()?.toLowerCase();
     return ext !== "html" && ext !== "htm";
-  }, [activeViewingFile, viewingVersionCode, showSandbox]);
+  }, [activeViewingFile, viewingVersionCode]);
 
   if (loadingProject) {
     return (
@@ -602,10 +600,7 @@ export default function WorkspacePage() {
               }}
               isExtensionFile={isExtensionFile}
               fileName={activeViewingFile && activeViewingFile !== "generated" ? activeViewingFile : undefined}
-              hasSandbox={hasSandbox}
-              isSandboxActive={showSandbox}
-              sandboxFileCount={sandboxHtml ? project?.importedFiles?.length ?? 0 : 0}
-              onToggleSandbox={() => setShowSandbox(!showSandbox)}
+              sandboxHtml={sandboxHtml}
             />
           </div>
         )}

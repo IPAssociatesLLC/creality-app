@@ -162,7 +162,7 @@ export default function ChatPanel({ onBuildStart, onBuildEnd, onGitHubImport, on
     autoResizeTextarea();
   }, [input, autoResizeTextarea]);
 
-  const handleModeSwitch = (mode: BuildMode) => { if (mode === buildMode) return; setBuildMode(mode); setMessages([]); onConversationUpdate([]); setLastPrompt(null); };
+  const handleModeSwitch = (mode: BuildMode) => { if (mode === buildMode) return; setBuildMode(mode); };
 
   const isValidHtmlCode = (code: string): boolean => {
     if (!code || code.length < 30) return false;

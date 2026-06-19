@@ -7,10 +7,7 @@ interface PreviewPanelProps {
   isExtensionFile?: boolean;
   fileName?: string;
   onCodeUpdate?: (code: string) => void;
-  hasSandbox?: boolean;
-  isSandboxActive?: boolean;
-  sandboxFileCount?: number;
-  onToggleSandbox?: () => void;
+  sandboxHtml?: string | null;
 }
 
 type DeviceMode = "desktop" | "tablet" | "mobile";
@@ -103,22 +100,22 @@ function isValidHtmlPreview(code: string | null): boolean {
   return hasDoctype || hasHtmlTag || (hasScriptOrStyle && hasDiv);
 }
 
-export default function PreviewPanel({ isBuilding, generatedCode, isViewingVersion, isExtensionFile, fileName, onCodeUpdate, hasSandbox, isSandboxActive, sandboxFileCount, onToggleSandbox }: PreviewPanelProps) {
+export default function PreviewPanel({ isBuilding, generatedCode, isViewingVersion, isExtensionFile, fileName, onCodeUpdate, sandboxHtml }: PreviewPanelProps) {
   const isExt = isExtensionFile ?? (generatedCode !== null && !generatedCode.trimStart().startsWith("<!") && !generatedCode.trimStart().startsWith("<html"));
   const isNonHtmlCode = generatedCode !== null && !isExt && !isValidHtmlPreview(generatedCode);
-  const hasAnyCode = !!generatedCode;
+  const hasAnyCode = !!generatedCode || !!sandboxHtml;
   const [device, setDevice] = useState<DeviceMode>("desktop");
   const [viewMode, setViewMode] = useState<ViewMode>(hasAnyCode ? "preview" : "code");
   const [refreshKey, setRefreshKey] = useState(0);
-  const iframeUrl = useBlobUrl(!isExt && !isNonHtmlCode ? generatedCode : null);
+  const iframeUrl = useBlobUrl(viewMode === "preview" && sandboxHtml ? sandboxHtml : (!isExt && !isNonHtmlCode ? generatedCode : null));
 
   useEffect(() => {
     if (hasAnyCode && !isExt && !isNonHtmlCode) {
       setViewMode("preview");
-    } else if (hasAnyCode && (isExt || isNonHtmlCode)) {
+    } else if (hasAnyCode && (isExt || isNonHtmlCode) && !sandboxHtml) {
       setViewMode("code");
     }
-  }, [isExt, isNonHtmlCode, hasAnyCode]);
+  }, [isExt, isNonHtmlCode, hasAnyCode, sandboxHtml]);
 
   const handleExport = () => { if (!generatedCode) return; const blob = new Blob([generatedCode], { type: "text/html" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = "app.html"; a.click(); URL.revokeObjectURL(url); };
 
@@ -127,18 +124,17 @@ export default function PreviewPanel({ isBuilding, generatedCode, isViewingVersi
   return <div className="flex flex-col h-full bg-background-200 overflow-hidden">
     <div className="flex-shrink-0 flex items-center gap-1 md:gap-2 px-2 md:px-3 py-1.5 md:py-2 bg-background-100 border-b border-background-200 flex-wrap">
       <div className="flex items-center gap-0.5 bg-background-200/40 border border-background-300/60 rounded-lg p-0.5 flex-shrink-0">
-        <button onClick={() => setViewMode("preview")} className={`flex items-center gap-1 md:gap-1.5 px-2 md:px-2.5 h-6 rounded-md text-xs transition-colors cursor-pointer whitespace-nowrap ${viewMode === "preview" ? "bg-foreground-400/15 text-foreground-800" : "text-foreground-600 hover:text-foreground-800"}`}><i className="ri-eye-line text-[10px] md:text-xs" />Preview</button>
+        <button onClick={() => setViewMode("preview")} className={`flex items-center gap-1 md:gap-1.5 px-2 md:px-2.5 h-6 rounded-md text-xs transition-colors cursor-pointer whitespace-nowrap ${viewMode === "preview" ? "bg-foreground-400/15 text-foreground-800" : "text-foreground-600 hover:text-foreground-800"}`}><i className="ri-eye-line text-[10px] md:text-xs" />Preview{sandboxHtml && <span className="ml-1 opacity-70 hidden sm:inline">(App)</span>}</button>
         <button onClick={() => setViewMode("code")} className={`flex items-center gap-1 md:gap-1.5 px-2 md:px-2.5 h-6 rounded-md text-xs transition-colors cursor-pointer whitespace-nowrap ${viewMode === "code" ? "bg-foreground-400/15 text-foreground-800" : "text-foreground-600 hover:text-foreground-800"}`}><i className="ri-code-line text-[10px] md:text-xs" />Code</button>
       </div>
-      {isExt && generatedCode && !hasSandbox && <div className="flex items-center gap-1.5 md:gap-2 text-[10px] md:text-xs text-foreground-600 bg-primary-500/10 border border-primary-500/20 rounded-lg px-2 md:px-2.5 py-1 flex-shrink-0"><i className="ri-puzzle-line text-primary-600 text-[10px] md:text-xs" /><span className="text-primary-700 font-medium whitespace-nowrap hidden sm:inline">Code view</span></div>}
-      {hasSandbox && !isExt && (isSandboxActive ? <div className="flex items-center gap-1.5 md:gap-2 bg-secondary-500/10 border border-secondary-500/20 rounded-lg px-2 md:px-2.5 py-1"><i className="ri-play-circle-line text-secondary-400 text-[10px] md:text-xs" /><span className="text-[10px] md:text-xs text-secondary-400 font-medium whitespace-nowrap hidden sm:inline">App Preview</span><span className="text-[10px] text-secondary-400/70">{sandboxFileCount} files</span><button onClick={onToggleSandbox} className="text-[10px] text-foreground-500 hover:text-foreground-800 ml-1 px-1.5 py-0.5 rounded hover:bg-background-200/60 transition-colors cursor-pointer whitespace-nowrap"><i className="ri-file-code-line text-[10px]" />View files</button></div> : <button onClick={onToggleSandbox} className="flex items-center gap-1 md:gap-1.5 text-[10px] md:text-xs text-foreground-600 bg-background-200/40 border border-background-300/60 rounded-lg px-2 md:px-2.5 py-1 hover:border-foreground-500 hover:text-foreground-800 transition-colors cursor-pointer whitespace-nowrap"><i className="ri-play-circle-line text-[10px] md:text-xs" />Preview<span className="text-[10px] text-foreground-500 ml-0.5">({sandboxFileCount})</span></button>)}
+      {isExt && generatedCode && !sandboxHtml && <div className="flex items-center gap-1.5 md:gap-2 text-[10px] md:text-xs text-foreground-600 bg-primary-500/10 border border-primary-500/20 rounded-lg px-2 md:px-2.5 py-1 flex-shrink-0"><i className="ri-puzzle-line text-primary-600 text-[10px] md:text-xs" /><span className="text-primary-700 font-medium whitespace-nowrap hidden sm:inline">Code view</span></div>}
       {isViewingVersion && <div className="flex items-center gap-1 md:gap-1.5 bg-accent-500/10 border border-accent-500/20 rounded-lg px-2 md:px-2.5 py-1 md:py-1.5 flex-shrink-0"><i className="ri-history-line text-accent-400 text-[10px]" /><span className="text-[10px] text-accent-400 whitespace-nowrap hidden sm:inline">Version preview</span></div>}
       <div className="flex-1" />
       {viewMode === "preview" && <div className="flex items-center gap-0.5 bg-background-200/40 border border-background-300/60 rounded-lg p-0.5 flex-shrink-0">{(Object.entries(deviceSizes) as [DeviceMode, typeof deviceSizes[DeviceMode]][]).map(([mode, cfg]) => <button key={mode} onClick={() => setDevice(mode)} title={cfg.label} className={`w-6 md:w-7 h-6 md:h-7 flex items-center justify-center rounded-md transition-colors cursor-pointer ${device === mode ? "bg-foreground-400/15 text-foreground-800" : "text-foreground-600 hover:text-foreground-800"}`}><i className={`${cfg.icon} text-[10px] md:text-xs`} /></button>)}</div>}
       <button onClick={handleExport} disabled={!generatedCode} title="Download HTML" className="w-6 md:w-7 h-6 md:h-7 flex items-center justify-center rounded-lg hover:bg-background-200/60 transition-colors cursor-pointer text-foreground-500 hover:text-foreground-700 disabled:opacity-30 disabled:cursor-not-allowed flex-shrink-0"><i className="ri-download-line text-xs md:text-sm" /></button>
       <button onClick={() => setRefreshKey(k => k + 1)} className="w-6 md:w-7 h-6 md:h-7 flex items-center justify-center rounded-lg hover:bg-background-200/60 transition-colors cursor-pointer text-foreground-500 hover:text-foreground-700 flex-shrink-0" title="Refresh preview"><i className="ri-refresh-line text-xs md:text-sm" /></button></div>
 
-    {viewMode === "preview" && (canPreview || (hasSandbox && isSandboxActive)) ? (
+    {viewMode === "preview" && canPreview ? (
       <div className="flex-1 overflow-auto flex items-start justify-center p-4 min-h-0">
         <div className="h-full rounded-xl overflow-hidden border border-background-300/60 relative transition-all duration-300 bg-background-950" style={{ width: deviceSizes[device].w, minHeight: "500px" }}>
           {isBuilding && <div className="absolute inset-0 z-10 bg-background-950/70 backdrop-blur-sm flex flex-col items-center justify-center gap-3"><div className="w-8 h-8 border-2 border-background-400/60 border-t-foreground-300 rounded-full animate-spin" /><p className="text-xs text-foreground-400 font-medium">Building your app...</p></div>}
