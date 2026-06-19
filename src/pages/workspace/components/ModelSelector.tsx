@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { loadConfig, saveConfig, getUserApiKeys, saveUserApiKey, deleteUserApiKey } from "@/utils/ai-api";
 
 export interface ModelConfig {
   id: string;
@@ -60,20 +61,6 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
 
 export interface StoredConfig {
   selectedModel: string;
-  apiKeys: Record<string, string>;
-  baseUrls: Record<string, string>;
-}
-
-export function loadConfig(): StoredConfig {
-  try {
-    const raw = localStorage.getItem("creailty_model_config");
-    if (raw) return JSON.parse(raw);
-  } catch { /* ignore */ }
-  return { selectedModel: "gpt-4o", apiKeys: {}, baseUrls: {} };
-}
-
-export function saveConfig(config: StoredConfig) {
-  localStorage.setItem("creailty_model_config", JSON.stringify(config));
 }
 
 interface ModelSelectorProps {
@@ -81,50 +68,71 @@ interface ModelSelectorProps {
 }
 
 export default function ModelSelector({ onClose }: ModelSelectorProps) {
-  const [config, setConfig] = useState<StoredConfig>(loadConfig);
+  const [config, setConfig] = useState<StoredConfig>({ selectedModel: "gpt-4o" });
   const [editingModel, setEditingModel] = useState<string | null>(null);
   const [tempKey, setTempKey] = useState("");
   const [tempUrl, setTempUrl] = useState("");
   const [saved, setSaved] = useState(false);
+  const [userKeys, setUserKeys] = useState<Set<string>>(new Set());
+  const [keysLoading, setKeysLoading] = useState(true);
 
   useEffect(() => {
-    saveConfig(config);
-  }, [config]);
+    loadConfig().then((cfg) => setConfig(cfg));
+    loadUserKeys();
+  }, []);
 
-  const selectModel = (modelId: string) => {
+  const loadUserKeys = async () => {
+    try {
+      const keys = await getUserApiKeys();
+      setUserKeys(new Set(keys.map((k) => k.model_id)));
+    } catch {
+      // User might not be logged in or keys table unavailable
+    } finally {
+      setKeysLoading(false);
+    }
+  };
+
+  const selectModel = async (modelId: string) => {
     setConfig(prev => ({ ...prev, selectedModel: modelId }));
+    await saveConfig({ selectedModel: modelId });
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
 
   const startEditKey = (modelId: string) => {
     setEditingModel(modelId);
-    setTempKey(config.apiKeys[modelId] || "");
-    setTempUrl(config.baseUrls[modelId] || "");
+    setTempKey("");
+    setTempUrl("");
   };
 
-  const saveKey = () => {
-    if (!editingModel) return;
-    setConfig(prev => ({
-      ...prev,
-      apiKeys: { ...prev.apiKeys, [editingModel]: tempKey },
-      baseUrls: tempUrl ? { ...prev.baseUrls, [editingModel]: tempUrl } : prev.baseUrls,
-    }));
-    setEditingModel(null);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+  const saveKey = async () => {
+    if (!editingModel || !tempKey.trim()) return;
+    try {
+      await saveUserApiKey(editingModel, tempKey.trim(), tempUrl.trim() || undefined);
+      setUserKeys(prev => new Set([...prev, editingModel]));
+      setEditingModel(null);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch {
+      // silently fail - the edge function will fall back to platform keys
+    }
   };
 
-  const removeKey = (modelId: string) => {
-    const newKeys = { ...config.apiKeys };
-    delete newKeys[modelId];
-    const newUrls = { ...config.baseUrls };
-    delete newUrls[modelId];
-    setConfig(prev => ({ ...prev, apiKeys: newKeys, baseUrls: newUrls }));
+  const removeKey = async (modelId: string) => {
+    try {
+      await deleteUserApiKey(modelId);
+      setUserKeys(prev => {
+        const next = new Set(prev);
+        next.delete(modelId);
+        return next;
+      });
+    } catch {
+      // silently fail
+    }
   };
 
   const selectedModel = AVAILABLE_MODELS.find(m => m.id === config.selectedModel);
-  const hasSelectedKey = selectedModel ? !!config.apiKeys[selectedModel.id] : false;
+  const hasSelectedKey = selectedModel ? userKeys.has(selectedModel.id) : false;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -133,7 +141,7 @@ export default function ModelSelector({ onClose }: ModelSelectorProps) {
         <div className="flex items-center justify-between px-5 py-4 border-b border-background-200/60 flex-shrink-0">
           <div>
             <h2 className="text-sm font-semibold text-foreground-800">AI Model Settings</h2>
-            <p className="text-xs text-foreground-500 mt-0.5">Choose your model and add your API key</p>
+            <p className="text-xs text-foreground-500 mt-0.5">Choose your model. Keys are stored securely on our servers.</p>
           </div>
           <button onClick={onClose} className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-background-200/60 transition-colors cursor-pointer">
             <i className="ri-close-line text-foreground-500 text-sm" />
@@ -149,11 +157,11 @@ export default function ModelSelector({ onClose }: ModelSelectorProps) {
               </span>
               {hasSelectedKey ? (
                 <span className="flex items-center gap-1 text-xs text-accent-400">
-                  <span className="w-1.5 h-1.5 rounded-full bg-accent-500 inline-block" />API key set
+                  <span className="w-1.5 h-1.5 rounded-full bg-accent-500 inline-block" />Your key
                 </span>
               ) : (
-                <span className="flex items-center gap-1 text-xs text-foreground-600">
-                  <span className="w-1.5 h-1.5 rounded-full bg-foreground-600 inline-block" />No API key
+                <span className="flex items-center gap-1 text-xs text-secondary-400">
+                  <span className="w-1.5 h-1.5 rounded-full bg-secondary-500 inline-block" />Platform key
                 </span>
               )}
             </div>
@@ -166,7 +174,7 @@ export default function ModelSelector({ onClose }: ModelSelectorProps) {
         <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-2">
           {AVAILABLE_MODELS.map(model => {
             const isSelected = config.selectedModel === model.id;
-            const hasKey = !!config.apiKeys[model.id];
+            const hasKey = userKeys.has(model.id);
             const isEditing = editingModel === model.id;
 
             return (
@@ -187,13 +195,15 @@ export default function ModelSelector({ onClose }: ModelSelectorProps) {
                         </div>
                         <p className="text-xs text-foreground-500 mt-1 leading-relaxed">{model.description}</p>
                         <div className="flex items-center gap-3 mt-2.5">
-                          {hasKey ? (
-                            <span className="text-[11px] text-accent-400 flex items-center gap-1"><i className="ri-key-2-line text-xs" />Key configured</span>
+                          {keysLoading ? (
+                            <span className="text-[11px] text-foreground-500">Loading...</span>
+                          ) : hasKey ? (
+                            <span className="text-[11px] text-accent-400 flex items-center gap-1"><i className="ri-key-2-line text-xs" />Your key active</span>
                           ) : (
-                            <span className="text-[11px] text-foreground-600 flex items-center gap-1"><i className="ri-key-2-line text-xs" />API key needed</span>
+                            <span className="text-[11px] text-secondary-400 flex items-center gap-1"><i className="ri-shield-check-line text-xs" />Platform key</span>
                           )}
                           <button onClick={() => startEditKey(model.id)} className="text-[11px] text-foreground-500 hover:text-foreground-700 cursor-pointer whitespace-nowrap">
-                            {hasKey ? "Change key" : "Add key"}
+                            {hasKey ? "Change key" : "Bring own key"}
                           </button>
                           {hasKey && (
                             <button onClick={() => removeKey(model.id)} className="text-[11px] text-foreground-600 hover:text-accent-500 cursor-pointer whitespace-nowrap">Remove</button>
@@ -226,7 +236,7 @@ export default function ModelSelector({ onClose }: ModelSelectorProps) {
           })}
         </div>
         <div className="flex items-center justify-between px-5 py-3 border-t border-background-200/60 flex-shrink-0 bg-background-100">
-          <p className="text-[10px] text-foreground-600">Keys are stored in your browser only. Never sent to our servers.</p>
+          <p className="text-[10px] text-foreground-600">API keys are encrypted and stored on our servers. Never exposed to your browser.</p>
           <button onClick={onClose} className="text-xs font-medium text-foreground-500 hover:text-foreground-800 px-3 py-1.5 rounded-lg hover:bg-background-200/60 transition-colors cursor-pointer whitespace-nowrap">Done</button>
         </div>
       </div>

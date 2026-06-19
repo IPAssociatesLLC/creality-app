@@ -55,14 +55,22 @@ export default function Home() {
                 key={item}
                 href={`#${item.toLowerCase()}`}
                 onClick={(e) => handleAnchorClick(e, `#${item.toLowerCase()}`)}
-                className="text-sm px-3 py-1.5 rounded-lg transition-colors cursor-pointer whitespace-nowrap text-foreground-600 hover:text-foreground-800"
+                className={`text-sm px-3 py-1.5 rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
+                  scrolled
+                    ? "text-foreground-600 hover:text-foreground-800"
+                    : "text-white/70 hover:text-white"
+                }`}
               >
                 {item}
               </a>
             ))}
             <Link
               to="/pricing"
-              className="text-sm px-3 py-1.5 rounded-lg transition-colors cursor-pointer whitespace-nowrap text-foreground-600 hover:text-foreground-800"
+              className={`text-sm px-3 py-1.5 rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
+                scrolled
+                  ? "text-foreground-600 hover:text-foreground-800"
+                  : "text-white/70 hover:text-white"
+              }`}
             >
               Pricing
             </Link>
@@ -71,9 +79,15 @@ export default function Home() {
           <div className="flex items-center gap-3">
             <button
               onClick={() => setShowGitHub(true)}
-              className="hidden sm:flex items-center gap-1.5 text-sm transition-colors cursor-pointer whitespace-nowrap text-foreground-600 hover:text-foreground-800"
+              className={`hidden sm:flex items-center gap-1.5 text-sm transition-colors cursor-pointer whitespace-nowrap ${
+                scrolled
+                  ? "text-foreground-600 hover:text-foreground-800"
+                  : "text-white/70 hover:text-white"
+              }`}
             >
-              <i className="ri-github-line" />
+              <div className="w-4 h-4 flex items-center justify-center">
+                <i className="ri-github-line" />
+              </div>
               Import
             </button>
             <button
@@ -81,14 +95,16 @@ export default function Home() {
               className="hidden sm:flex items-center gap-1.5 bg-accent-500 text-white text-sm font-medium px-4 py-2 rounded-xl hover:bg-accent-600 transition-colors cursor-pointer whitespace-nowrap"
             >
               Start building
-              <i className="ri-arrow-right-line text-xs" />
+              <div className="w-4 h-4 flex items-center justify-center">
+                <i className="ri-arrow-right-line text-xs" />
+              </div>
             </button>
             <button
               className="md:hidden w-8 h-8 flex items-center justify-center cursor-pointer"
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               aria-label="Toggle menu"
             >
-              <i className={`text-lg text-foreground-800 ${mobileMenuOpen ? "ri-close-line" : "ri-menu-line"}`} />
+              <i className={`text-lg ${scrolled ? "text-foreground-800" : "text-white"} ${mobileMenuOpen ? "ri-close-line" : "ri-menu-line"}`} />
             </button>
           </div>
         </div>
@@ -100,13 +116,13 @@ export default function Home() {
             <a href="#faq" onClick={(e) => { handleAnchorClick(e, "#faq"); setMobileMenuOpen(false); }} className="text-sm text-foreground-700 hover:text-foreground-950 transition-colors cursor-pointer py-1">FAQ</a>
             <Link to="/pricing" onClick={() => setMobileMenuOpen(false)} className="text-sm text-foreground-700 hover:text-foreground-950 transition-colors cursor-pointer py-1">Pricing</Link>
             <button onClick={() => { setMobileMenuOpen(false); navigate("/workspace"); }} className="flex items-center justify-center gap-1.5 bg-accent-500 text-white text-sm font-medium px-4 py-2.5 rounded-xl hover:bg-accent-600 transition-colors cursor-pointer whitespace-nowrap mt-1">
-              Start building <i className="ri-arrow-right-line text-xs" />
+              Start building <div className="w-4 h-4 flex items-center justify-center"><i className="ri-arrow-right-line text-xs" /></div>
             </button>
           </div>
         )}
       </nav>
 
-      <HeroSection />
+      <HeroSection onImport={() => setShowGitHub(true)} />
       <FeaturesSection />
       <HowItWorksSection />
       <ShowcaseSection />

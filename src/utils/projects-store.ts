@@ -1,5 +1,5 @@
 import type { ConversationMessage } from "@/utils/ai-api";
-import { scheduleCloudSync } from "@/utils/cloud-sync";
+import { supabase } from "@/lib/supabase";
 
 export interface ProjectVersion {
   id: string;
@@ -8,6 +8,7 @@ export interface ProjectVersion {
   label: string;
   timestamp: number;
   prompt: string;
+  versionNumber?: number;
 }
 
 export interface ImportedFile {
@@ -30,100 +31,48 @@ export interface Project {
   importedFiles: ImportedFile[];
 }
 
-// ── Per-user sandboxing ──
-// Each user's projects are stored under a user-scoped localStorage key.
-// This prevents data leakage between different users on the same device.
+// ── Supabase-backed project operations (NO localStorage) ──
 
-const LEGACY_KEY = "creailty_projects_v1";
-const KEY_PREFIX = "creailty_projects_v2";
+export async function listProjects(): Promise<Project[]> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
 
-let currentUserId: string | null = null;
+  const { data, error } = await supabase
+    .from("projects")
+    .select("*")
+    .eq("user_id", user.id)
+    .order("updated_at", { ascending: false });
 
-function getStorageKey(): string {
-  // If no user ID yet, use a temporary guest namespace
-  const uid = currentUserId || "guest";
-  return `${KEY_PREFIX}_${uid}`;
-}
-
-/**
- * Set the active user for localStorage sandboxing.
- * Migrates data from the old shared key on first run.
- */
-export function setCurrentUserId(userId: string): void {
-  if (currentUserId === userId) return;
-
-  // Before switching users, persist current data
-  if (currentUserId) {
-    // No need to explicitly save - data was already saved during normal operations
+  if (error) {
+    console.warn("CreAIlity: failed to list projects", error);
+    return [];
   }
 
-  currentUserId = userId;
-
-  // Migration: if new user-scoped key is empty but legacy key has data, migrate it
-  const newKey = getStorageKey();
-  const legacyRaw = localStorage.getItem(LEGACY_KEY);
-
-  if (legacyRaw && !localStorage.getItem(newKey)) {
-    try {
-      const legacy = JSON.parse(legacyRaw) as Record<string, Project>;
-      // Only migrate if there's actual data
-      const entries = Object.values(legacy);
-      if (entries.length > 0) {
-        localStorage.setItem(newKey, legacyRaw);
-        // Keep legacy key as backup, don't delete it
-      }
-    } catch {
-      // Corrupt legacy data, ignore
-    }
-  }
+  return ((data || []) as Record<string, unknown>[]).map(rowToProject).filter((p): p is Project => p !== null);
 }
 
-/**
- * Clear the active user. Call on logout to ensure clean state.
- */
-export function clearCurrentUserId(): void {
-  currentUserId = null;
+export async function loadProject(id: string): Promise<Project | null> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  const { data, error } = await supabase
+    .from("projects")
+    .select("*")
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (error || !data) return null;
+  return rowToProject(data as Record<string, unknown>);
 }
 
-export { setCloudUser, pullProjectsFromCloud } from "@/utils/cloud-sync";
+export async function createProject(name: string): Promise<Project> {
+  const { data: { user } } = await supabase.auth.getUser();
+  const userId = user?.id;
 
-export function getAllProjects(): Record<string, Project> {
-  try {
-    const raw = localStorage.getItem(getStorageKey());
-    if (raw) {
-      const parsed = JSON.parse(raw) as Record<string, Project>;
-      // Migrate old projects without versions or importedFiles fields
-      for (const id in parsed) {
-        if (!Array.isArray(parsed[id].versions)) {
-          parsed[id].versions = [];
-        }
-        if (parsed[id].activeVersionId === undefined) {
-          parsed[id].activeVersionId = null;
-        }
-        if (!Array.isArray(parsed[id].importedFiles)) {
-          parsed[id].importedFiles = [];
-        }
-      }
-      return parsed;
-    }
-    return {};
-  } catch {
-    return {};
-  }
-}
-
-export function persistAllProjects(projects: Record<string, Project>): void {
-  try {
-    localStorage.setItem(getStorageKey(), JSON.stringify(projects));
-    // Trigger debounced cloud sync
-    scheduleCloudSync();
-  } catch (err) {
-    console.warn("CreAIlity: failed to persist projects", err);
-  }
-}
-
-export function createProject(name: string): Project {
   const id = `proj_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const now = new Date().toISOString();
+
   const project: Project = {
     id,
     name,
@@ -136,66 +85,82 @@ export function createProject(name: string): Project {
     activeVersionId: null,
     importedFiles: [],
   };
-  const all = getAllProjects();
-  all[id] = project;
-  persistAllProjects(all);
+
+  if (userId) {
+    const { error } = await supabase.from("projects").insert({
+      id,
+      user_id: userId,
+      name,
+      generated_code: null,
+      conversation_history: [],
+      imported_files: [],
+      preview_slug: id,
+      custom_domain: null,
+      created_at: now,
+      updated_at: now,
+    });
+
+    if (error) console.warn("CreAIlity: failed to create project in Supabase", error);
+  }
+
   return project;
 }
 
-export function saveProject(project: Project): void {
-  const all = getAllProjects();
-  all[project.id] = { ...project, updatedAt: Date.now() };
-  persistAllProjects(all);
+export async function saveProject(project: Project): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser();
+  const userId = user?.id;
+  if (!userId) return;
+
+  const { error } = await supabase.from("projects").upsert({
+    id: project.id,
+    user_id: userId,
+    name: project.name,
+    generated_code: project.generatedCode,
+    conversation_history: project.conversationHistory || [],
+    imported_files: project.importedFiles || [],
+    preview_slug: project.previewSlug || project.id,
+    custom_domain: project.customDomain || null,
+    created_at: new Date(project.createdAt).toISOString(),
+    updated_at: new Date(Date.now()).toISOString(),
+  }, { onConflict: "id" });
+
+  if (error) console.warn("CreAIlity: failed to save project to Supabase", error);
 }
 
-export function loadProject(id: string): Project | null {
-  const all = getAllProjects();
-  return all[id] ?? null;
+export async function deleteProject(id: string): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser();
+  const userId = user?.id;
+  if (!userId) return;
+
+  await supabase.from("projects").delete().eq("id", id).eq("user_id", userId);
+  await supabase.from("project_versions").delete().eq("project_id", id);
+  await supabase.from("sandbox_deployments").delete().eq("project_id", id);
 }
 
-export function listProjects(): Project[] {
-  const all = getAllProjects();
+// ── Version history (Supabase-backed with sequential numbering) ──
 
-  // Clean up ghost "New Project" entries that have no content
-  let cleaned = false;
-  for (const id in all) {
-    const p = all[id];
-    if (
-      p.name === "New Project" &&
-      !p.generatedCode &&
-      p.conversationHistory.length === 0 &&
-      p.versions.length === 0 &&
-      (!p.importedFiles || p.importedFiles.length === 0)
-    ) {
-      delete all[id];
-      cleaned = true;
-    }
-  }
-
-  if (cleaned) {
-    persistAllProjects(all);
-  }
-
-  return Object.values(all).sort((a, b) => b.updatedAt - a.updatedAt);
-}
-
-export function deleteProject(id: string): void {
-  const all = getAllProjects();
-  delete all[id];
-  persistAllProjects(all);
-}
-
-// ── Version history ──
-
-export function saveVersion(
+export async function saveVersion(
   projectId: string,
   code: string,
   label: string,
   prompt: string,
-): ProjectVersion {
-  const all = getAllProjects();
-  const project = all[projectId];
-  if (!project) throw new Error("Project not found");
+): Promise<ProjectVersion> {
+  const { data: { user } } = await supabase.auth.getUser();
+  const userId = user?.id;
+
+  let nextNumber = 1;
+  if (userId) {
+    const { data, error } = await supabase
+      .from("project_versions")
+      .select("version_number")
+      .eq("project_id", projectId)
+      .order("version_number", { ascending: false })
+      .limit(1);
+
+    if (!error && data && data.length > 0 && data[0].version_number !== null) {
+      nextNumber = ((data[0] as Record<string, unknown>).version_number as number) + 1;
+    }
+  }
 
   const version: ProjectVersion = {
     id: `ver_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -204,48 +169,101 @@ export function saveVersion(
     label,
     timestamp: Date.now(),
     prompt,
+    versionNumber: nextNumber,
   };
 
-  project.versions = [version, ...project.versions].slice(0, 50); // Keep last 50
-  project.updatedAt = Date.now();
-  persistAllProjects(all);
+  if (userId) {
+    await supabase.from("project_versions").insert({
+      id: version.id,
+      project_id: projectId,
+      user_id: userId,
+      code,
+      label,
+      timestamp: new Date(version.timestamp).toISOString(),
+      prompt,
+      version_number: nextNumber,
+    });
+  }
 
   return version;
 }
 
-export function getVersions(projectId: string): ProjectVersion[] {
-  const all = getAllProjects();
-  return all[projectId]?.versions ?? [];
+export async function getVersions(projectId: string): Promise<ProjectVersion[]> {
+  const { data: { user } } = await supabase.auth.getUser();
+  const userId = user?.id;
+  if (!userId) return [];
+
+  const { data, error } = await supabase
+    .from("project_versions")
+    .select("*")
+    .eq("project_id", projectId)
+    .order("version_number", { ascending: false })
+    .limit(50);
+
+  if (error || !data) return [];
+
+  return (data as Record<string, unknown>[]).map((v) => ({
+    id: v.id as string,
+    projectId: v.project_id as string,
+    code: v.code as string,
+    label: v.label as string,
+    timestamp: new Date(v.timestamp as string).getTime(),
+    prompt: (v.prompt as string) || "",
+    versionNumber: (v.version_number as number) || undefined,
+  }));
 }
 
-export function restoreVersion(projectId: string, versionId: string): Project | null {
-  const all = getAllProjects();
-  const project = all[projectId];
-  if (!project) return null;
+export async function restoreVersion(projectId: string, versionId: string): Promise<Project | null> {
+  const { data: { user } } = await supabase.auth.getUser();
+  const userId = user?.id;
 
-  const version = project.versions.find((v) => v.id === versionId);
+  const versions = await getVersions(projectId);
+  const version = versions.find((v) => v.id === versionId);
   if (!version) return null;
 
-  project.generatedCode = version.code;
-  project.activeVersionId = versionId;
-  project.updatedAt = Date.now();
-  persistAllProjects(all);
-
-  return { ...project };
-}
-
-export function deleteVersion(projectId: string, versionId: string): void {
-  const all = getAllProjects();
-  const project = all[projectId];
-  if (!project) return;
-
-  project.versions = project.versions.filter((v) => v.id !== versionId);
-  if (project.activeVersionId === versionId) {
-    project.activeVersionId = null;
+  if (userId) {
+    await supabase.from("projects").update({
+      generated_code: version.code,
+      updated_at: new Date().toISOString(),
+    }).eq("id", projectId).eq("user_id", userId);
   }
-  project.updatedAt = Date.now();
-  persistAllProjects(all);
+
+  const project = await loadProject(projectId);
+  if (project) {
+    project.generatedCode = version.code;
+    project.activeVersionId = versionId;
+  }
+  return project;
 }
+
+export async function deleteVersion(projectId: string, versionId: string): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser();
+  const userId = user?.id;
+  if (!userId) return;
+
+  await supabase.from("project_versions").delete().eq("id", versionId).eq("user_id", userId);
+}
+
+// ── Internal helpers ──
+
+function rowToProject(row: Record<string, unknown>): Project | null {
+  if (!row || typeof row.id !== "string") return null;
+  return {
+    id: row.id as string,
+    name: (row.name as string) || "Untitled",
+    createdAt: row.created_at ? new Date(row.created_at as string).getTime() : Date.now(),
+    updatedAt: row.updated_at ? new Date(row.updated_at as string).getTime() : Date.now(),
+    generatedCode: (row.generated_code as string) || null,
+    conversationHistory: (row.conversation_history as ConversationMessage[]) || [],
+    previewSlug: (row.preview_slug as string) || (row.id as string),
+    customDomain: (row.custom_domain as string) || undefined,
+    versions: [],
+    activeVersionId: null,
+    importedFiles: (row.imported_files as ImportedFile[]) || [],
+  };
+}
+
+// ── Formatting helpers ──
 
 export function formatRelativeTime(timestamp: number): string {
   const diff = Date.now() - timestamp;
@@ -269,12 +287,319 @@ export function formatVersionTime(timestamp: number): string {
   });
 }
 
-/**
- * Generate a short label for a version based on the user prompt
- */
 export function generateVersionLabel(prompt: string): string {
-  // Clean up and truncate
   const cleaned = prompt.replace(/\s+/g, " ").trim();
   if (cleaned.length <= 40) return cleaned;
   return `${cleaned.slice(0, 37)}...`;
+}
+
+// ── Conversation persistence (Supabase-backed, full history) ──
+
+export async function getOrCreateConversation(projectId: string): Promise<string | null> {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return null;
+
+    const { data: existing } = await supabase
+      .from("conversations")
+      .select("id")
+      .eq("project_id", projectId)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (existing) return existing.id as string;
+
+    const { data: created, error } = await supabase
+      .from("conversations")
+      .insert({
+        project_id: projectId,
+        user_id: user.id,
+        title: "New conversation",
+      })
+      .select("id")
+      .single();
+
+    if (error) {
+      console.warn("CreAIlity: failed to create conversation", error);
+      return null;
+    }
+    return created.id as string;
+  } catch (err) {
+    console.warn("CreAIlity: getOrCreateConversation failed", err);
+    return null;
+  }
+}
+
+export async function saveMessage(
+  conversationId: string | null,
+  role: "user" | "assistant",
+  content: string,
+  tokensUsed?: number,
+): Promise<void> {
+  if (!conversationId) return;
+  const { error } = await supabase.from("messages").insert({
+    conversation_id: conversationId,
+    role,
+    content,
+    tokens_used: tokensUsed ?? null,
+  });
+  if (error) console.warn("CreAIlity: failed to save message", error);
+}
+
+export async function loadConversationMessages(
+  conversationId: string | null,
+  maxMessages: number = 50,
+): Promise<ConversationMessage[]> {
+  if (!conversationId) return [];
+  const { data, error } = await supabase
+    .from("messages")
+    .select("role, content")
+    .eq("conversation_id", conversationId)
+    .order("created_at", { ascending: false })
+    .limit(maxMessages);
+
+  if (error) {
+    console.warn("CreAIlity: failed to load messages", error);
+    return [];
+  }
+
+  // Reverse to chronological order
+  return ((data || []) as { role: string; content: string }[]).reverse().map((m) => ({
+    role: m.role as "user" | "assistant",
+    content: m.content,
+  }));
+}
+
+export async function getConversationSummary(
+  conversationId: string | null,
+): Promise<string> {
+  if (!conversationId) return "";
+  try {
+    const { data, error } = await supabase
+      .from("conversations")
+      .select("summary")
+      .eq("id", conversationId)
+      .maybeSingle();
+
+    if (error || !data) return "";
+    return (data as Record<string, unknown>).summary as string || "";
+  } catch {
+    return "";
+  }
+}
+
+export async function countConversationMessages(
+  conversationId: string | null,
+): Promise<number> {
+  if (!conversationId) return 0;
+  try {
+    const { count, error } = await supabase
+      .from("messages")
+      .select("id", { count: "exact", head: true })
+      .eq("conversation_id", conversationId);
+
+    if (error) return 0;
+    return count ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+// Build a project context snapshot so the AI always knows the current file state
+export function buildProjectContext(files: ImportedFile[], generatedCode?: string | null): string {
+  const parts: string[] = [];
+
+  if (generatedCode) {
+    parts.push(`[Generated HTML (single-file app)]\nLength: ${generatedCode.length} chars\nPreview: ${generatedCode.slice(0, 300)}...`);
+  }
+
+  if (files && files.length > 0) {
+    parts.push(`[Project Files — ${files.length} total]`);
+    for (const file of files) {
+      const preview = file.content.slice(0, 200).replace(/\n/g, " ");
+      parts.push(`  ${file.name} (${file.language}, ${file.content.length} chars): ${preview}...`);
+    }
+  }
+
+  return parts.join("\n");
+}
+
+// ── Plan enforcement ──
+
+export interface UserPlan {
+  tier: "free" | "pro" | "byok" | "hosting";
+  status: "active" | "trial" | "cancelled" | "expired";
+  creditsRemaining: number;
+  creditsMonthly: number;
+  buildsUsedThisMonth: number;
+  buildsLimitMonthly: number;
+  projectsLimit: number;
+}
+
+export async function getUserPlan(): Promise<UserPlan | null> {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return null;
+
+    const { data } = await supabase
+      .from("user_plans")
+      .select("*")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (!data) return defaultFreePlan();
+
+    return {
+      tier: data.plan_tier as UserPlan["tier"],
+      status: data.status as UserPlan["status"],
+      creditsRemaining: data.credits_remaining as number,
+      creditsMonthly: data.credits_monthly as number,
+      buildsUsedThisMonth: data.builds_used_this_month as number,
+      buildsLimitMonthly: data.builds_limit_monthly as number,
+      projectsLimit: data.projects_limit as number,
+    };
+  } catch (err) {
+    console.warn("CreAIlity: getUserPlan failed", err);
+    return null;
+  }
+}
+
+export async function incrementBuildCount(): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return;
+
+  await supabase.rpc("increment_build_count");
+}
+
+function defaultFreePlan(): UserPlan {
+  return {
+    tier: "free",
+    status: "active",
+    creditsRemaining: 20,
+    creditsMonthly: 20,
+    buildsUsedThisMonth: 0,
+    buildsLimitMonthly: 20,
+    projectsLimit: 3,
+  };
+}
+
+export async function countUserProjects(): Promise<number> {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return 0;
+
+    const { count, error } = await supabase
+      .from("projects")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id);
+
+    if (error) return 0;
+    return count ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+// ── Credit & build enforcement ──
+
+export async function checkCanBuild(): Promise<{ allowed: boolean; reason: string }> {
+  const plan = await getUserPlan();
+  if (!plan) return { allowed: true, reason: "" };
+
+  // Block cancelled/expired plans
+  if (plan.status === "cancelled" || plan.status === "expired") {
+    return { allowed: false, reason: `Your ${plan.tier} subscription has ${plan.status}. Please renew to continue building.` };
+  }
+
+  // BYOK: unlimited, no credit checks
+  if (plan.tier === "byok") return { allowed: true, reason: "" };
+
+  // Hosting: no builds allowed
+  if (plan.tier === "hosting") return { allowed: false, reason: "Hosting plan does not include AI credits. Upgrade to Pro or BYOK to build apps." };
+
+  // Free: check builds remaining
+  if (plan.tier === "free" && plan.buildsUsedThisMonth >= plan.buildsLimitMonthly) {
+    return { allowed: false, reason: `You've used all ${plan.buildsLimitMonthly} free credits this month. Upgrade to continue.` };
+  }
+
+  // Check credits remaining
+  if (plan.creditsRemaining <= 0 && plan.tier !== "byok") {
+    return { allowed: false, reason: `You're out of credits. Your plan resets monthly with ${plan.creditsMonthly} credits.` };
+  }
+
+  return { allowed: true, reason: "" };
+}
+
+export async function getModelCreditCost(modelId: string): Promise<number> {
+  try {
+    const { data } = await supabase
+      .from("platform_config")
+      .select("value")
+      .eq("key", `model_cost_${modelId}`)
+      .maybeSingle();
+    if (data?.value) return parseInt(data.value as string) || 3;
+  } catch { /* fall through */ }
+
+  // Default costs by model
+  const defaults: Record<string, number> = {
+    "gpt-4o": 3,
+    "claude-3.5-sonnet": 5,
+    "gemini-2.0-flash": 2,
+    "deepseek-v3": 2,
+    "grok-3": 4,
+  };
+  return defaults[modelId] || 3;
+}
+
+export async function deductCredits(amount: number): Promise<{ success: boolean; remaining: number }> {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, remaining: 0 };
+
+    const { data: plan, error } = await supabase
+      .from("user_plans")
+      .select("credits_remaining")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (error || !plan) return { success: false, remaining: 0 };
+
+    const newRemaining = Math.max(0, (plan.credits_remaining as number || 0) - amount);
+
+    await supabase
+      .from("user_plans")
+      .update({ credits_remaining: newRemaining, updated_at: new Date().toISOString() })
+      .eq("user_id", user.id);
+
+    return { success: true, remaining: newRemaining };
+  } catch {
+    return { success: false, remaining: 0 };
+  }
+}
+
+// ── Prompt optimization ──
+
+export async function optimizePrompt(raw: string): Promise<string> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return raw;
+
+  try {
+    const { data, error } = await supabase.functions.invoke("ai-proxy", {
+      body: {
+        model: "gpt-4o",
+        messages: [
+          {
+            role: "system",
+            content: "You are a prompt optimizer for an AI app builder. Take the user's vague prompt and turn it into a highly specific, detailed prompt that will produce the best possible web app. Include details about layout, colors, features, interactions, responsiveness, and UI components. Keep it under 300 words. Output ONLY the optimized prompt, no explanations.",
+          },
+          { role: "user", content: raw },
+        ],
+      },
+    });
+
+    if (error || !data?.choices?.[0]?.message?.content) return raw;
+    return data.choices[0].message.content.trim();
+  } catch {
+    return raw;
+  }
 }

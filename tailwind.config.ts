@@ -79,12 +79,19 @@ export default {
         body: ["var(--font-body)", "Inter", "system-ui", "sans-serif"],
         label: ["var(--font-label)", "Inter", "system-ui", "sans-serif"],
         mono: ["var(--font-mono)", "JetBrains Mono", "ui-monospace", "SFMono-Regular", "monospace"],
+        display: ["var(--font-display)", "Playfair Display", "Georgia", "Times New Roman", "serif"],
       },
       animation: {
         "fade-up": "fadeUp 0.6s ease-out forwards",
         "fade-in": "fadeIn 0.5s ease-out forwards",
         "slide-in": "slideIn 0.5s ease-out forwards",
         "float": "float 3s ease-in-out infinite",
+        "glow-pulse-1": "glowPulse1 8s ease-in-out infinite",
+        "glow-pulse-2": "glowPulse2 10s ease-in-out infinite",
+        "glow-pulse-3": "glowPulse3 12s ease-in-out infinite",
+        "slide-up": "slideUp 0.4s ease-out forwards",
+        "slide-down": "slideDown 0.4s ease-out forwards",
+        "shimmer": "shimmer 2s linear infinite",
       },
       keyframes: {
         fadeUp: {
@@ -102,6 +109,30 @@ export default {
         float: {
           "0%, 100%": { transform: "translateY(0px)" },
           "50%": { transform: "translateY(-8px)" },
+        },
+        glowPulse1: {
+          "0%, 100%": { opacity: "0.3", transform: "translate(0, 0) scale(1)" },
+          "50%": { opacity: "0.5", transform: "translate(10px, -10px) scale(1.1)" },
+        },
+        glowPulse2: {
+          "0%, 100%": { opacity: "0.25", transform: "translate(0, 0) scale(1)" },
+          "50%": { opacity: "0.45", transform: "translate(-10px, 5px) scale(1.15)" },
+        },
+        glowPulse3: {
+          "0%, 100%": { opacity: "0.2", transform: "translate(0, 0) scale(1)" },
+          "50%": { opacity: "0.35", transform: "translate(5px, -5px) scale(1.2)" },
+        },
+        slideUp: {
+          "0%": { opacity: "0", transform: "translateY(8px)" },
+          "100%": { opacity: "1", transform: "translateY(0)" },
+        },
+        slideDown: {
+          "0%": { opacity: "0", transform: "translateY(-8px)" },
+          "100%": { opacity: "1", transform: "translateY(0)" },
+        },
+        shimmer: {
+          "0%": { backgroundPosition: "-200% 0" },
+          "100%": { backgroundPosition: "200% 0" },
         },
       },
     },

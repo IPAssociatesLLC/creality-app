@@ -51,56 +51,93 @@ function CodeEditor({ code, onSave, fileName }: { code: string; onSave: (updated
   };
   const handleSave = useCallback(() => { onSave(value); setSaved(true); setTimeout(() => setSaved(false), 2000); }, [value, onSave]);
 
-  return <div className="flex flex-col h-full bg-background-950 overflow-hidden">
-    <div className="flex-shrink-0 flex items-center justify-between px-4 py-2 border-b border-background-800/60 bg-background-900">
+  return <div className="flex flex-col h-full bg-[#0d1117] overflow-hidden">
+    <div className="flex-shrink-0 flex items-center justify-between px-4 py-2 border-b border-white/10 bg-[#161b22]">
       <div className="flex items-center gap-2">
-        <span className="text-[10px] text-foreground-500 font-mono uppercase tracking-widest">{fileName ? fileName.split(".").pop()?.toUpperCase() || "FILE" : "HTML"}</span>
-        {fileName && <span className="text-[10px] text-foreground-600 truncate max-w-[200px]" title={fileName}>{fileName}</span>}
-        <span className="text-[10px] text-foreground-600">{lineCount} lines</span>
+        <span className="text-[10px] text-white/50 font-mono uppercase tracking-widest">{fileName ? fileName.split(".").pop()?.toUpperCase() || "FILE" : "HTML"}</span>
+        {fileName && <span className="text-[10px] text-white/60 truncate max-w-[200px]" title={fileName}>{fileName}</span>}
+        <span className="text-[10px] text-white/40">{lineCount} lines</span>
       </div>
       <div className="flex items-center gap-2">
-        <button onClick={() => navigator.clipboard.writeText(value)} className="flex items-center gap-1.5 text-xs text-foreground-500 hover:text-foreground-300 px-2 py-1 rounded-lg hover:bg-background-800/60 transition-colors cursor-pointer whitespace-nowrap"><i className="ri-clipboard-line text-xs" />Copy</button>
-        <button onClick={handleSave} className="flex items-center gap-1.5 text-xs font-medium px-3 py-1 rounded-lg transition-colors cursor-pointer whitespace-nowrap" style={{ backgroundColor: saved ? '#22c55e20' : '#ffffff15', color: saved ? '#22c55e' : '#e4e4e7' }}>{saved ? <><i className="ri-check-line text-xs" />Applied</> : <><i className="ri-save-line text-xs" />Apply changes</>}</button>
+        <button onClick={() => navigator.clipboard.writeText(value)} className="flex items-center gap-1.5 text-xs text-white/60 hover:text-white/90 px-2 py-1 rounded-lg hover:bg-white/10 transition-colors cursor-pointer whitespace-nowrap"><i className="ri-clipboard-line text-xs" />Copy</button>
+        <button onClick={handleSave} className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1 rounded-lg transition-colors cursor-pointer whitespace-nowrap ${saved ? "bg-green-500/10 text-green-400" : "bg-white/10 text-white/80 hover:bg-white/20"}`}>{saved ? <><i className="ri-check-line text-xs" />Applied</> : <><i className="ri-save-line text-xs" />Apply changes</>}</button>
       </div>
     </div>
     <div className="flex flex-1 overflow-hidden font-mono text-xs">
-      <div ref={lineNumbersRef} className="flex-shrink-0 overflow-hidden select-none bg-background-950 border-r border-background-800/60 text-right" style={{ width: "44px", paddingTop: "12px", paddingBottom: "12px" }}>{Array.from({ length: lineCount }, (_, i) => <div key={i} className="text-foreground-700 leading-5 px-2" style={{ fontSize: "11px" }}>{i + 1}</div>)}</div>
-      <textarea ref={textareaRef} value={value} onChange={(e) => setValue(e.target.value)} onKeyDown={handleKeyDown} onScroll={handleScroll} spellCheck={false} className="flex-1 bg-background-950 text-foreground-300 resize-none outline-none leading-5 p-3 overflow-auto" style={{ fontSize: "11px", tabSize: 2 }} />
+      <div ref={lineNumbersRef} className="flex-shrink-0 overflow-hidden select-none bg-[#0d1117] border-r border-white/10 text-right" style={{ width: "48px", paddingTop: "12px", paddingBottom: "12px" }}>
+        {Array.from({ length: lineCount }, (_, i) => (
+          <div key={i} className="text-white/30 leading-5 px-3" style={{ fontSize: "12px" }}>{i + 1}</div>
+        ))}
+      </div>
+      <textarea
+        ref={textareaRef}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={handleKeyDown}
+        onScroll={handleScroll}
+        spellCheck={false}
+        className="flex-1 bg-[#0d1117] text-[#e6edf3] resize-none outline-none leading-5 p-3 overflow-auto selection:bg-[#264f78]"
+        style={{ fontSize: "12px", tabSize: 2 }}
+      />
     </div>
-    <div className="flex-shrink-0 px-4 py-1.5 bg-background-900 border-t border-background-800/60"><p className="text-[10px] text-foreground-600"><kbd className="bg-background-800/60 border border-background-700/50 rounded px-1 font-mono">⌘S</kbd> to apply · <kbd className="bg-background-800/60 border border-background-700/50 rounded px-1 font-mono">Tab</kbd> to indent</p></div>
+    <div className="flex-shrink-0 px-4 py-1.5 bg-[#161b22] border-t border-white/10">
+      <p className="text-[10px] text-white/40">
+        <kbd className="bg-white/10 border border-white/15 rounded px-1 font-mono text-white/60">⌘S</kbd> to apply · <kbd className="bg-white/10 border border-white/15 rounded px-1 font-mono text-white/60">Tab</kbd> to indent
+      </p>
+    </div>
   </div>;
+}
+
+function isValidHtmlPreview(code: string | null): boolean {
+  if (!code || code.length < 30) return false;
+  const hasDoctype = /<!DOCTYPE\s+html/i.test(code);
+  const hasHtmlTag = /<html[\s>]/i.test(code);
+  const hasScriptOrStyle = /<script[\s>]|<\/script>|<style[\s>]|<\/style>|<link\s/i.test(code);
+  const hasDiv = /<div[\s>]/i.test(code);
+  const isAdviceText = /troubleshoot|check.*error|ensure.*correct|verify.*setup|inspect.*console|npm run|terminal|build error|Let.s ensure|Double.check|should consider/i.test(code);
+  if (isAdviceText && !hasDoctype && !hasHtmlTag) return false;
+  return hasDoctype || hasHtmlTag || (hasScriptOrStyle && hasDiv);
 }
 
 export default function PreviewPanel({ isBuilding, generatedCode, isViewingVersion, isExtensionFile, fileName, onCodeUpdate, hasSandbox, isSandboxActive, sandboxFileCount, onToggleSandbox }: PreviewPanelProps) {
   const isExt = isExtensionFile ?? (generatedCode !== null && !generatedCode.trimStart().startsWith("<!") && !generatedCode.trimStart().startsWith("<html"));
-  const isImportedHtml = !!fileName && !isExtensionFile;
+  const isNonHtmlCode = generatedCode !== null && !isExt && !isValidHtmlPreview(generatedCode);
+  const hasAnyCode = !!generatedCode;
   const [device, setDevice] = useState<DeviceMode>("desktop");
-  const [viewMode, setViewMode] = useState<ViewMode>(isExt || isImportedHtml ? "code" : "preview");
+  const [viewMode, setViewMode] = useState<ViewMode>(hasAnyCode ? "preview" : "code");
   const [refreshKey, setRefreshKey] = useState(0);
-  const iframeUrl = useBlobUrl(!isExt ? generatedCode : null);
+  const iframeUrl = useBlobUrl(!isExt && !isNonHtmlCode ? generatedCode : null);
 
-  useEffect(() => { if (isExt || isImportedHtml) setViewMode("code"); else setViewMode("preview"); }, [isExt, isImportedHtml]);
+  useEffect(() => {
+    if (hasAnyCode && !isExt && !isNonHtmlCode) {
+      setViewMode("preview");
+    } else if (hasAnyCode && (isExt || isNonHtmlCode)) {
+      setViewMode("code");
+    }
+  }, [isExt, isNonHtmlCode, hasAnyCode]);
 
   const handleExport = () => { if (!generatedCode) return; const blob = new Blob([generatedCode], { type: "text/html" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = "app.html"; a.click(); URL.revokeObjectURL(url); };
 
-  return <div className="flex flex-col h-full bg-background-200 overflow-hidden">
-    <div className="flex-shrink-0 flex items-center gap-2 px-3 py-2 bg-background-100 border-b border-background-200">
-      {!isExt && <div className="flex items-center gap-0.5 bg-background-200/40 border border-background-300/60 rounded-lg p-0.5 flex-shrink-0">
-        <button onClick={() => setViewMode("preview")} className={`flex items-center gap-1.5 px-2.5 h-6 rounded-md text-xs transition-colors cursor-pointer whitespace-nowrap ${viewMode === "preview" ? "bg-foreground-400/15 text-foreground-800" : "text-foreground-600 hover:text-foreground-800"}`}><i className="ri-eye-line text-xs" />Preview</button>
-        <button onClick={() => setViewMode("code")} className={`flex items-center gap-1.5 px-2.5 h-6 rounded-md text-xs transition-colors cursor-pointer whitespace-nowrap ${viewMode === "code" ? "bg-foreground-400/15 text-foreground-800" : "text-foreground-600 hover:text-foreground-800"}`}><i className="ri-code-line text-xs" />Code</button>
-      </div>}
-      {isExt && <div className="flex items-center gap-2 text-xs text-foreground-600 bg-primary-500/10 border border-primary-500/20 rounded-lg px-2.5 py-1 flex-shrink-0"><i className="ri-puzzle-line text-primary-600 text-xs" /><span className="text-primary-700 font-medium whitespace-nowrap">Extension file</span></div>}
-      {hasSandbox && !isExt && (isSandboxActive ? <div className="flex items-center gap-2 bg-secondary-500/10 border border-secondary-500/20 rounded-lg px-2.5 py-1"><i className="ri-play-circle-line text-secondary-400 text-xs" /><span className="text-xs text-secondary-400 font-medium whitespace-nowrap">App Preview</span><span className="text-[10px] text-secondary-400/70">{sandboxFileCount} files</span><button onClick={onToggleSandbox} className="text-[10px] text-foreground-500 hover:text-foreground-800 ml-1 px-1.5 py-0.5 rounded hover:bg-background-200/60 transition-colors cursor-pointer whitespace-nowrap"><i className="ri-file-code-line text-[10px]" />View files</button></div> : <button onClick={onToggleSandbox} className="flex items-center gap-1.5 text-xs text-foreground-600 bg-background-200/40 border border-background-300/60 rounded-lg px-2.5 py-1 hover:border-foreground-500 hover:text-foreground-800 transition-colors cursor-pointer whitespace-nowrap"><i className="ri-play-circle-line text-xs" />Preview App<span className="text-[10px] text-foreground-500">({sandboxFileCount} files)</span></button>)}
-      {isViewingVersion && <div className="flex items-center gap-1.5 bg-accent-500/10 border border-accent-500/20 rounded-lg px-2.5 py-1.5 flex-shrink-0"><i className="ri-history-line text-accent-400 text-[10px]" /><span className="text-[10px] text-accent-400 whitespace-nowrap">Version preview</span></div>}
-      <div className="flex-1" />
-      {viewMode === "preview" && !isExt && <div className="flex items-center gap-0.5 bg-background-200/40 border border-background-300/60 rounded-lg p-0.5 flex-shrink-0">{(Object.entries(deviceSizes) as [DeviceMode, typeof deviceSizes[DeviceMode]][]).map(([mode, cfg]) => <button key={mode} onClick={() => setDevice(mode)} title={cfg.label} className={`w-7 h-7 flex items-center justify-center rounded-md transition-colors cursor-pointer ${device === mode ? "bg-foreground-400/15 text-foreground-800" : "text-foreground-600 hover:text-foreground-800"}`}><i className={`${cfg.icon} text-xs`} /></button>)}</div>}
-      {!isExt && <><button onClick={handleExport} disabled={!generatedCode} title="Download HTML" className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-background-200/60 transition-colors cursor-pointer text-foreground-500 hover:text-foreground-700 disabled:opacity-30 disabled:cursor-not-allowed flex-shrink-0"><i className="ri-download-line text-sm" /></button><button onClick={() => setRefreshKey(k => k + 1)} className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-background-200/60 transition-colors cursor-pointer text-foreground-500 hover:text-foreground-700 flex-shrink-0" title="Refresh preview"><i className="ri-refresh-line text-sm" /></button></>}
-    </div>
+  const canPreview = hasAnyCode;
 
-    {(!isExt && viewMode === "preview") ? (
+  return <div className="flex flex-col h-full bg-background-200 overflow-hidden">
+    <div className="flex-shrink-0 flex items-center gap-1 md:gap-2 px-2 md:px-3 py-1.5 md:py-2 bg-background-100 border-b border-background-200 flex-wrap">
+      <div className="flex items-center gap-0.5 bg-background-200/40 border border-background-300/60 rounded-lg p-0.5 flex-shrink-0">
+        <button onClick={() => setViewMode("preview")} className={`flex items-center gap-1 md:gap-1.5 px-2 md:px-2.5 h-6 rounded-md text-xs transition-colors cursor-pointer whitespace-nowrap ${viewMode === "preview" ? "bg-foreground-400/15 text-foreground-800" : "text-foreground-600 hover:text-foreground-800"}`}><i className="ri-eye-line text-[10px] md:text-xs" />Preview</button>
+        <button onClick={() => setViewMode("code")} className={`flex items-center gap-1 md:gap-1.5 px-2 md:px-2.5 h-6 rounded-md text-xs transition-colors cursor-pointer whitespace-nowrap ${viewMode === "code" ? "bg-foreground-400/15 text-foreground-800" : "text-foreground-600 hover:text-foreground-800"}`}><i className="ri-code-line text-[10px] md:text-xs" />Code</button>
+      </div>
+      {isExt && generatedCode && <div className="flex items-center gap-1.5 md:gap-2 text-[10px] md:text-xs text-foreground-600 bg-primary-500/10 border border-primary-500/20 rounded-lg px-2 md:px-2.5 py-1 flex-shrink-0"><i className="ri-puzzle-line text-primary-600 text-[10px] md:text-xs" /><span className="text-primary-700 font-medium whitespace-nowrap hidden sm:inline">Code view</span></div>}
+      {hasSandbox && !isExt && (isSandboxActive ? <div className="flex items-center gap-1.5 md:gap-2 bg-secondary-500/10 border border-secondary-500/20 rounded-lg px-2 md:px-2.5 py-1"><i className="ri-play-circle-line text-secondary-400 text-[10px] md:text-xs" /><span className="text-[10px] md:text-xs text-secondary-400 font-medium whitespace-nowrap hidden sm:inline">App Preview</span><span className="text-[10px] text-secondary-400/70">{sandboxFileCount} files</span><button onClick={onToggleSandbox} className="text-[10px] text-foreground-500 hover:text-foreground-800 ml-1 px-1.5 py-0.5 rounded hover:bg-background-200/60 transition-colors cursor-pointer whitespace-nowrap"><i className="ri-file-code-line text-[10px]" />View files</button></div> : <button onClick={onToggleSandbox} className="flex items-center gap-1 md:gap-1.5 text-[10px] md:text-xs text-foreground-600 bg-background-200/40 border border-background-300/60 rounded-lg px-2 md:px-2.5 py-1 hover:border-foreground-500 hover:text-foreground-800 transition-colors cursor-pointer whitespace-nowrap"><i className="ri-play-circle-line text-[10px] md:text-xs" />Preview<span className="text-[10px] text-foreground-500 ml-0.5">({sandboxFileCount})</span></button>)}
+      {isViewingVersion && <div className="flex items-center gap-1 md:gap-1.5 bg-accent-500/10 border border-accent-500/20 rounded-lg px-2 md:px-2.5 py-1 md:py-1.5 flex-shrink-0"><i className="ri-history-line text-accent-400 text-[10px]" /><span className="text-[10px] text-accent-400 whitespace-nowrap hidden sm:inline">Version preview</span></div>}
+      <div className="flex-1" />
+      {viewMode === "preview" && <div className="flex items-center gap-0.5 bg-background-200/40 border border-background-300/60 rounded-lg p-0.5 flex-shrink-0">{(Object.entries(deviceSizes) as [DeviceMode, typeof deviceSizes[DeviceMode]][]).map(([mode, cfg]) => <button key={mode} onClick={() => setDevice(mode)} title={cfg.label} className={`w-6 md:w-7 h-6 md:h-7 flex items-center justify-center rounded-md transition-colors cursor-pointer ${device === mode ? "bg-foreground-400/15 text-foreground-800" : "text-foreground-600 hover:text-foreground-800"}`}><i className={`${cfg.icon} text-[10px] md:text-xs`} /></button>)}</div>}
+      <button onClick={handleExport} disabled={!generatedCode} title="Download HTML" className="w-6 md:w-7 h-6 md:h-7 flex items-center justify-center rounded-lg hover:bg-background-200/60 transition-colors cursor-pointer text-foreground-500 hover:text-foreground-700 disabled:opacity-30 disabled:cursor-not-allowed flex-shrink-0"><i className="ri-download-line text-xs md:text-sm" /></button>
+      <button onClick={() => setRefreshKey(k => k + 1)} className="w-6 md:w-7 h-6 md:h-7 flex items-center justify-center rounded-lg hover:bg-background-200/60 transition-colors cursor-pointer text-foreground-500 hover:text-foreground-700 flex-shrink-0" title="Refresh preview"><i className="ri-refresh-line text-xs md:text-sm" /></button></div>
+
+    {viewMode === "preview" && (canPreview || (hasSandbox && isSandboxActive)) ? (
       <div className="flex-1 overflow-auto flex items-start justify-center p-4 min-h-0">
-        <div className="h-full rounded-xl overflow-hidden border border-background-300/60 relative transition-all duration-300 bg-background-950" style={{ width: deviceSizes[device].w, minHeight: "500px" }}>
-          {isBuilding && <div className="absolute inset-0 z-10 bg-background-950/70 backdrop-blur-sm flex flex-col items-center justify-center gap-3"><div className="w-8 h-8 border-2 border-background-400/60 border-t-foreground-300 rounded-full animate-spin" /><p className="text-xs text-foreground-400 font-medium">Building your app...</p></div>}
+        <div className="h-full rounded-xl overflow-hidden border border-background-300/60 relative transition-all duration-300 bg-white" style={{ width: deviceSizes[device].w, minHeight: "500px" }}>
+          {isBuilding && <div className="absolute inset-0 z-10 bg-white/80 backdrop-blur-sm flex flex-col items-center justify-center gap-3"><div className="w-8 h-8 border-2 border-background-300 border-t-foreground-400 rounded-full animate-spin" /><p className="text-xs text-foreground-500 font-medium">Building your app...</p></div>}
           <iframe key={refreshKey} src={iframeUrl} className="w-full h-full border-0" title="App Preview" sandbox="allow-scripts allow-same-origin" />
         </div>
       </div>

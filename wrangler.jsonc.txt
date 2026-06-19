@@ -1,0 +1,26 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "creality-sandbox",
+  "main": "cloudflare-worker.js",
+  "compatibility_date": "2026-06-16",
+  "vars": {
+    "SANDBOX_TRANSPORT": "rpc",
+    "SUPABASE_URL": "https://qyyfygcflzyfucypmfeu.supabase.co",
+    "DEPLOY_SECRET": "change-me-in-production-secrets"
+  },
+  "bindings": [
+    {
+      "name": "SANDBOX",
+      "type": "sandbox",
+      "container": {
+        "image": "./Dockerfile"
+      }
+    }
+  ],
+  "routes": [
+    {
+      "pattern": "*.crealityapp.com/*",
+      "custom_domain": true
+    }
+  ]
+}

@@ -17,7 +17,7 @@ export default function PrivacyPage() {
             <div>
               <h2 className="text-base font-semibold text-foreground-900 mb-3">1. Information We Collect</h2>
               <p className="text-sm text-foreground-500 leading-relaxed">
-                CreAIlity is built with privacy as a core principle. We collect your email address for authentication and project data you create to provide the Service. We do NOT store your AI provider API keys on our servers — these stay in your browser&apos;s localStorage.
+                CreAIlity is built with privacy as a core principle. We collect your email address for authentication and project data you create to provide the Service. Your API keys and personal settings are stored securely in our encrypted database with user-level isolation.
               </p>
             </div>
             <div>
@@ -29,7 +29,7 @@ export default function PrivacyPage() {
             <div>
               <h2 className="text-base font-semibold text-foreground-900 mb-3">3. Data Storage & Security</h2>
               <p className="text-sm text-foreground-500 leading-relaxed">
-                Your project data is stored securely using industry-standard encryption. API keys for third-party AI providers are stored exclusively in your browser&apos;s localStorage and are never transmitted to our servers.
+                Your project data and API keys are stored securely in our database with user-level isolation and encryption. Your data is never shared with third parties.
               </p>
             </div>
             <div>

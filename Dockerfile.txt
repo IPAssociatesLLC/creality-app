@@ -1,0 +1,12 @@
+# CreAIlity Sandbox — Cloudflare Container
+FROM python:3.11-alpine
+
+WORKDIR /app
+
+# Install basic tools
+RUN apk add --no-cache curl bash
+
+# Default command: serve files from /app on port 8080
+# Files are written into /app at deploy time via sandbox.writeFile()
+EXPOSE 8080
+CMD ["python3", "-m", "http.server", "8080"]

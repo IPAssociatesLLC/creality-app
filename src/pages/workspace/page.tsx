@@ -10,11 +10,17 @@ import ModelSelector from "./components/ModelSelector";
 import {
   createProject,
   loadProject,
+  listProjects,
   saveProject,
   saveVersion,
   restoreVersion,
+  getOrCreateConversation,
+  countUserProjects,
+  getUserPlan,
+  buildProjectContext,
   type Project,
   type ImportedFile,
+  type UserPlan,
 } from "@/utils/projects-store";
 import type { ConversationMessage } from "@/utils/ai-api";
 import { buildSandboxHtml } from "@/utils/sandbox-bundler";
@@ -26,6 +32,7 @@ export default function WorkspacePage() {
   const navigate = useNavigate();
 
   const [project, setProject] = useState<Project | null>(null);
+  const [loadingProject, setLoadingProject] = useState(true);
   const [isBuilding, setIsBuilding] = useState(false);
   const [showGitHub, setShowGitHub] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
@@ -40,52 +47,110 @@ export default function WorkspacePage() {
   const [shareCopied, setShareCopied] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [mobilePreviewActive, setMobilePreviewActive] = useState(false);
+  const [conversationId, setConversationId] = useState<string | undefined>();
+  const [userPlan, setUserPlan] = useState<UserPlan | null>(null);
+  const [projectLimitModal, setProjectLimitModal] = useState(false);
   const mainAreaRef = useRef<HTMLDivElement>(null);
 
-  // Sandbox HTML for multi-file imported projects
   const sandboxHtml = useMemo(() => {
     if (!project?.importedFiles || project.importedFiles.length === 0) return null;
     const result = buildSandboxHtml(project.importedFiles);
     return result?.html ?? null;
   }, [project?.importedFiles]);
 
+  const projectContext = useMemo(() => {
+    if (!project) return "";
+    return buildProjectContext(project.importedFiles || [], project.generatedCode);
+  }, [project?.importedFiles, project?.generatedCode]);
+
   const hasSandbox = sandboxHtml !== null;
   const [showSandbox, setShowSandbox] = useState(hasSandbox);
 
   const idFromUrl = searchParams.get("id");
 
+  // Guard against duplicate project creation on re-render after navigate
+  const initStartedRef = useRef(false);
+
   useEffect(() => {
-    if (idFromUrl) {
-      const existing = loadProject(idFromUrl);
-      if (existing) {
-        setProject(existing);
-        setViewingVersionCode(null);
-        setLastUserPrompt("");
-        if (existing.generatedCode) {
-          setActiveViewingFile("generated");
-        } else if (existing.importedFiles && existing.importedFiles.length > 0) {
-          setActiveViewingFile(existing.importedFiles[0].name);
-        } else {
-          setActiveViewingFile(null);
-        }
+    let cancelled = false;
+    async function init() {
+      // If we already have the matching project loaded in state, skip re-init
+      if (idFromUrl && project && project.id === idFromUrl && !loadingProject) {
+        setLoadingProject(false);
         return;
       }
-    }
 
-    const fresh = createProject("New Project");
-    setProject(fresh);
-    setViewingVersionCode(null);
-    setLastUserPrompt("");
-    setActiveViewingFile(null);
-    navigate(`/workspace?id=${fresh.id}`, { replace: true });
+      setLoadingProject(true);
+
+      try {
+        // Load user plan (never throws)
+        const plan = await getUserPlan().catch(() => null);
+        if (!cancelled) setUserPlan(plan);
+
+        if (idFromUrl) {
+          // Load specific project by ID
+          const existing = await loadProject(idFromUrl).catch(() => null);
+          if (!cancelled && existing) {
+            setProject(existing);
+            setViewingVersionCode(null);
+            setLastUserPrompt("");
+            if (existing.generatedCode) {
+              setActiveViewingFile("generated");
+            } else if (existing.importedFiles && existing.importedFiles.length > 0) {
+              setActiveViewingFile(existing.importedFiles[0].name);
+            } else {
+              setActiveViewingFile(null);
+            }
+            // Wire up conversation persistence — never block on this
+            getOrCreateConversation(existing.id).then((cid) => {
+              if (!cancelled) setConversationId(cid);
+            }).catch(() => {});
+            setLoadingProject(false);
+            return;
+          }
+          // ID in URL but project not found in Supabase
+          if (project && project.id === idFromUrl) {
+            setLoadingProject(false);
+            return;
+          }
+          // Project not found — clear URL and show empty state
+          setProject(null);
+          navigate("/workspace", { replace: true });
+          setLoadingProject(false);
+          return;
+        }
+
+        // No ID in URL: load the user's most recent project
+        const recentProjects = await listProjects().catch(() => []);
+        if (!cancelled && recentProjects.length > 0) {
+          const most = recentProjects[0];
+          // Redirect to the most recent project
+          navigate(`/workspace?id=${most.id}`, { replace: true });
+          // The URL change will re-trigger this effect
+          setLoadingProject(false);
+          return;
+        }
+
+        // User has zero projects — show empty state, DO NOT auto-create
+        if (!cancelled) {
+          setProject(null);
+          setLoadingProject(false);
+        }
+      } catch (err) {
+        console.error("Workspace init error:", err);
+        if (!cancelled) setLoadingProject(false);
+      }
+    }
+    init();
+    return () => { cancelled = true; };
   }, [idFromUrl]);
 
   const persistProject = useCallback(
-    (updates: Partial<Project>) => {
+    async (updates: Partial<Project>) => {
       if (!project) return;
       const updated = { ...project, ...updates };
       setProject(updated);
-      saveProject(updated);
+      await saveProject(updated);
     },
     [project]
   );
@@ -98,17 +163,19 @@ export default function WorkspacePage() {
     persistProject({ customDomain: domain });
   };
 
-  const handleCodeGenerated = (code: string) => {
+  const handleCodeGenerated = async (code: string) => {
     if (!project) return;
     const label = lastUserPrompt
       ? lastUserPrompt.slice(0, 60)
       : "Initial build";
     if (project.generatedCode !== code) {
-      saveVersion(project.id, code, label, lastUserPrompt || "Build");
+      await saveVersion(project.id, code, label, lastUserPrompt || "Build");
     }
-    const updated = loadProject(project.id);
-    if (updated) {
-      setProject(updated);
+    const cached = await loadProject(project.id);
+    if (cached) {
+      cached.generatedCode = code;
+      await saveProject(cached);
+      setProject({ ...cached });
       setViewingVersionCode(null);
       setActiveViewingFile("generated");
       setShowSandbox(false);
@@ -123,17 +190,27 @@ export default function WorkspacePage() {
     persistProject({ conversationHistory: history });
   };
 
-  const handleNewProject = () => {
-    const fresh = createProject("New Project");
+  const handleNewProject = async () => {
+    // Check project limits
+    if (userPlan && userPlan.tier === "free") {
+      const projectCount = await countUserProjects();
+      if (projectCount >= userPlan.projectsLimit) {
+        setProjectLimitModal(true);
+        return;
+      }
+    }
+    const fresh = await createProject("New Project");
     setProject(fresh);
     setViewingVersionCode(null);
     setLastUserPrompt("");
+    setActiveViewingFile(null);
     navigate(`/workspace?id=${fresh.id}`, { replace: true });
+    getOrCreateConversation(fresh.id).then(setConversationId).catch(() => {});
   };
 
-  const handleRestoreVersion = (versionId: string) => {
+  const handleRestoreVersion = async (versionId: string) => {
     if (!project) return;
-    const restored = restoreVersion(project.id, versionId);
+    const restored = await restoreVersion(project.id, versionId);
     if (restored) {
       setProject(restored);
       setViewingVersionCode(null);
@@ -223,15 +300,22 @@ export default function WorkspacePage() {
     setShowSandbox(false);
   };
 
-  const handleReactAppGenerated = (
+  const handleReactAppGenerated = async (
     files: { name: string; content: string; language: string }[]
   ) => {
     if (!project || files.length === 0) return;
     const label = lastUserPrompt
       ? lastUserPrompt.slice(0, 60)
       : "React app build";
-    saveVersion(project.id, JSON.stringify(files.map(f => f.name)), label, lastUserPrompt || "React app generated");
-    persistProject({ importedFiles: files });
+    await saveVersion(project.id, JSON.stringify(files.map(f => f.name)), label, lastUserPrompt || "React app generated");
+
+    const freshProject = await loadProject(project.id);
+    if (!freshProject) return;
+
+    freshProject.importedFiles = files;
+    freshProject.name = files.length > 0 ? "React App" : freshProject.name;
+    await saveProject(freshProject);
+    setProject({ ...freshProject });
     setActiveViewingFile(files[0].name);
     setViewingVersionCode(null);
     setShowSandbox(true);
@@ -270,10 +354,56 @@ export default function WorkspacePage() {
     return ext !== "html" && ext !== "htm";
   }, [activeViewingFile, viewingVersionCode, showSandbox]);
 
-  if (!project) {
+  if (loadingProject) {
     return (
       <div className="h-screen bg-background-50 flex items-center justify-center">
         <div className="w-6 h-6 border-2 border-background-400 border-t-foreground-300 rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!project) {
+    return (
+      <div className="h-screen bg-background-50 flex flex-col overflow-hidden">
+        <TopBar
+          projectName="New Project"
+          onProjectNameChange={() => {}}
+          isBuilding={false}
+          generatedCode={null}
+          projectId={null}
+          customDomain=""
+          onCustomDomainChange={() => {}}
+          userPlan={userPlan}
+        />
+        <div className="flex-1 flex items-center justify-center px-4">
+          <div className="text-center max-w-md">
+            <div className="w-16 h-16 flex items-center justify-center rounded-2xl bg-background-200/60 border border-background-300/60 mx-auto mb-5">
+              <i className="ri-rocket-2-line text-foreground-400 text-2xl" />
+            </div>
+            <h2 className="text-lg font-bold text-foreground-900 mb-2">Welcome to CreAIlity</h2>
+            <p className="text-sm text-foreground-500 mb-6 leading-relaxed">
+              You don&apos;t have any projects yet. Create your first project and start building with AI — describe any app, website, or browser extension.
+            </p>
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+              <button
+                onClick={handleNewProject}
+                className="inline-flex items-center gap-2 bg-accent-500 text-background-50 font-semibold px-5 py-2.5 rounded-xl hover:bg-accent-600 transition-colors cursor-pointer whitespace-nowrap"
+              >
+                <i className="ri-add-line text-sm" />
+                Create your first project
+              </button>
+              <button
+                onClick={() => setShowGitHub(true)}
+                className="inline-flex items-center gap-2 border border-background-300/60 text-foreground-700 font-medium px-5 py-2.5 rounded-xl hover:border-foreground-500 hover:text-foreground-900 transition-colors cursor-pointer whitespace-nowrap"
+              >
+                <i className="ri-github-line text-sm" />
+                Import from GitHub
+              </button>
+            </div>
+          </div>
+        </div>
+        {showGitHub && <GitHubModal onClose={() => setShowGitHub(false)} onImport={handleImportFromGitHub} />}
+        {showUpload && <UploadModal onClose={() => setShowUpload(false)} onUploaded={handleUploadedFiles} />}
       </div>
     );
   }
@@ -289,6 +419,7 @@ export default function WorkspacePage() {
         customDomain={project.customDomain || ""}
         onCustomDomainChange={handleCustomDomainChange}
         importedFiles={project.importedFiles}
+        userPlan={userPlan}
       />
 
       <div className="flex-shrink-0 flex items-center justify-between px-3 py-1.5 border-b border-background-200 bg-background-100">
@@ -333,7 +464,7 @@ export default function WorkspacePage() {
         </div>
       </div>
 
-      <div ref={mainAreaRef} className="flex flex-1 overflow-hidden min-h-0 pb-14 md:pb-0">
+      <div ref={mainAreaRef} className={`flex flex-1 overflow-hidden min-h-0 ${activePanel === "both" ? "pb-14 md:pb-0" : ""}`}>
         <div className={`w-52 flex-shrink-0 hidden md:flex flex-col h-full overflow-hidden border-r border-background-200 ${sidebarOpen ? '' : 'md:hidden'}`}>
           <Sidebar
             onGitHubImport={() => setShowGitHub(true)}
@@ -384,7 +515,13 @@ export default function WorkspacePage() {
         )}
 
         {(activePanel === "chat" || activePanel === "both") && (
-          <div className={`flex flex-col overflow-hidden border-r border-background-200 flex-shrink-0 ${activePanel === "chat" ? "flex-1" : "flex md:flex"}`}
+          <div className={`flex flex-col overflow-hidden border-r border-background-200 flex-shrink-0 ${
+            activePanel === "chat"
+              ? "flex-1"
+              : activePanel === "both" && mobilePreviewActive
+                ? "hidden md:flex"
+                : "flex md:flex"
+          }`}
             style={{ width: activePanel === "both" && !mobilePreviewActive ? `${chatPanelWidth}px` : undefined }}>
             <ChatPanel
               onBuildStart={() => setIsBuilding(true)}
@@ -397,6 +534,9 @@ export default function WorkspacePage() {
               onReactAppGenerated={handleReactAppGenerated}
               conversationHistory={project.conversationHistory}
               onConversationUpdate={handleConversationUpdate}
+              conversationId={conversationId}
+              userPlan={userPlan}
+              projectContext={projectContext}
             />
           </div>
         )}
@@ -412,7 +552,13 @@ export default function WorkspacePage() {
         )}
 
         {(activePanel === "preview" || activePanel === "both") && (
-          <div className={`flex flex-col overflow-hidden ${activePanel === "preview" ? "flex-1" : "hidden md:flex flex-1"}`}>
+          <div className={`flex flex-col overflow-hidden ${
+            activePanel === "preview"
+              ? "flex-1"
+              : activePanel === "both" && !mobilePreviewActive
+                ? "hidden md:flex flex-1"
+                : "flex md:flex flex-1"
+          }`}>
             {(project.generatedCode || (project.importedFiles && project.importedFiles.length > 0)) && (
               <div className="flex-shrink-0 flex items-center justify-between px-3 py-1.5 bg-background-100 border-b border-background-200">
                 <div className="flex items-center gap-1.5">
@@ -435,18 +581,18 @@ export default function WorkspacePage() {
               isBuilding={isBuilding}
               generatedCode={previewCode}
               isViewingVersion={!!viewingVersionCode}
-              onCodeUpdate={(code) => {
+              onCodeUpdate={async (code) => {
                 if (!project) return;
                 if (activeViewingFile && activeViewingFile !== "generated" && project.importedFiles) {
                   const updatedFiles = project.importedFiles.map((f) =>
                     f.name === activeViewingFile ? { ...f, content: code } : f
                   );
-                  saveVersion(project.id, code, `Edit ${activeViewingFile}`, "code editor");
-                  saveProject({ ...project, importedFiles: updatedFiles });
+                  await saveVersion(project.id, code, `Edit ${activeViewingFile}`, "code editor");
+                  await saveProject({ ...project, importedFiles: updatedFiles });
                   setProject((prev) => prev ? { ...prev, importedFiles: updatedFiles } : prev);
                 } else {
-                  saveVersion(project.id, code, "Manual edit", "code editor");
-                  const updated = loadProject(project.id);
+                  await saveVersion(project.id, code, "Manual edit", "code editor");
+                  const updated = await loadProject(project.id);
                   if (updated) setProject({ ...updated, generatedCode: code });
                 }
               }}
@@ -483,6 +629,24 @@ export default function WorkspacePage() {
       {showGitHub && <GitHubModal onClose={() => setShowGitHub(false)} onImport={handleImportFromGitHub} />}
       {showUpload && <UploadModal onClose={() => setShowUpload(false)} onUploaded={handleUploadedFiles} />}
       {showModelSettings && <ModelSelector onClose={() => setShowModelSettings(false)} />}
+
+      {/* Project Limit Modal */}
+      {projectLimitModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => { setProjectLimitModal(false); navigate("/pricing"); }} />
+          <div className="relative bg-background-50 rounded-2xl border border-background-300/60 p-6 max-w-sm w-full mx-4 shadow-2xl">
+            <div className="w-10 h-10 flex items-center justify-center rounded-xl bg-primary-500/10 mb-4 mx-auto">
+              <i className="ri-folder-line text-primary-500 text-lg" />
+            </div>
+            <h3 className="text-base font-bold text-foreground-900 text-center mb-1">Project limit reached</h3>
+            <p className="text-xs text-foreground-600 text-center mb-4">Free plan includes {userPlan?.projectsLimit || 3} projects. Upgrade to Pro for unlimited projects, all AI models, custom domains, and more.</p>
+            <div className="flex flex-col gap-2">
+              <a href="/pricing" className="w-full text-center bg-accent-500 text-background-50 rounded-xl py-2.5 text-sm font-semibold hover:bg-accent-500/90 transition-colors cursor-pointer whitespace-nowrap">Upgrade to Pro — $19/mo</a>
+              <button onClick={() => { setProjectLimitModal(false); navigate("/pricing"); }} className="w-full text-center text-foreground-600 hover:text-foreground-800 text-xs py-1.5 transition-colors cursor-pointer">View plans</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

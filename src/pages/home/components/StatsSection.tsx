@@ -29,15 +29,20 @@ export default function StatsSection() {
         <div ref={ref} className={`grid grid-cols-2 lg:grid-cols-4 gap-8 md:gap-12 mb-20 transition-all duration-700 ${visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"}`}>
           {stats.map((stat, i) => (
             <div key={stat.label} className="flex flex-col gap-1" style={{ transitionDelay: `${i * 80}ms` }}>
-              <div className="font-heading text-4xl md:text-5xl font-extrabold text-foreground-950">{stat.value}</div>
+              <div className="font-heading text-4xl md:text-5xl font-extrabold text-foreground-800">{stat.value}</div>
               <div className="text-sm font-semibold text-foreground-700">{stat.label}</div>
               <div className="text-xs text-foreground-600 leading-relaxed">{stat.description}</div>
             </div>
           ))}
         </div>
         <div className="mb-10">
-          <p className="text-xs font-medium text-foreground-600 uppercase tracking-widest mb-3">Loved by builders</p>
-          <h2 className="font-heading text-3xl md:text-4xl font-bold text-foreground-950">What people are saying</h2>
+          <p className="text-xs font-medium text-accent-500 uppercase tracking-widest mb-3">Loved by builders</p>
+          <h2 className="font-display text-3xl md:text-4xl lg:text-5xl font-bold">
+            What{" "}
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-cyan-400 to-blue-500">
+              people are saying
+            </span>
+          </h2>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {testimonials.map((t, i) => (

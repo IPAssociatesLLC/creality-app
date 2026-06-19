@@ -47,8 +47,12 @@ export default function ShowcaseSection() {
       <div className="max-w-6xl mx-auto">
         <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-6 mb-12">
           <div>
-            <p className="text-xs font-medium text-foreground-600 uppercase tracking-widest mb-3">Built with CreAIlity</p>
-            <h2 className="font-heading text-4xl md:text-5xl font-bold text-foreground-950 leading-tight">Real apps,<br /><span className="text-foreground-700">built in seconds.</span></h2>
+            <p className="text-xs font-medium text-accent-500 uppercase tracking-widest mb-3">Built with CreAIlity</p>
+            <h2 className="font-display text-4xl md:text-5xl lg:text-6xl font-bold leading-tight">
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-cyan-400 to-blue-500">
+                Real apps, built in seconds.
+              </span>
+            </h2>
           </div>
           <p className="text-sm text-foreground-600 max-w-xs md:text-right leading-relaxed">Every app below was generated from a single prompt — no code written by hand.</p>
         </div>

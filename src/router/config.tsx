@@ -13,11 +13,28 @@ import TermsPage from "../pages/terms/page";
 import PrivacyPage from "../pages/privacy/page";
 import ContactPage from "../pages/contact/page";
 import { AuthGuard } from "../components/feature/AuthGuard";
+import { AdminGuard } from "../components/feature/AdminGuard";
 
 function ProtectedWorkspace() {
   return (
     <AuthGuard>
       <WorkspacePage />
+    </AuthGuard>
+  );
+}
+
+function ProtectedAdmin() {
+  return (
+    <AdminGuard>
+      <AdminPage />
+    </AdminGuard>
+  );
+}
+
+function ProtectedSettings() {
+  return (
+    <AuthGuard>
+      <SettingsPage />
     </AuthGuard>
   );
 }
@@ -41,11 +58,11 @@ const routes: RouteObject[] = [
   },
   {
     path: "/settings",
-    element: <SettingsPage />,
+    element: <ProtectedSettings />,
   },
   {
     path: "/admin",
-    element: <AdminPage />,
+    element: <ProtectedAdmin />,
   },
   {
     path: "/pricing",

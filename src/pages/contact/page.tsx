@@ -46,7 +46,9 @@ export default function ContactPage() {
         <div className="max-w-2xl mx-auto">
           <div className="text-center mb-12">
             <p className="text-xs font-medium text-foreground-600 uppercase tracking-widest mb-4">Contact</p>
-            <h1 className="font-heading text-4xl md:text-5xl font-bold text-foreground-950 leading-tight mb-4">Get in touch</h1>
+            <h1 className="font-display text-4xl md:text-5xl font-bold text-foreground-950 leading-tight mb-4">
+              Get <span className="text-transparent bg-clip-text bg-gradient-to-r from-accent-500 to-secondary-500">in touch</span>
+            </h1>
             <p className="text-sm text-foreground-500 leading-relaxed max-w-md mx-auto">Have questions, feedback, or need help? We&apos;d love to hear from you.</p>
           </div>
 

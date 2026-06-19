@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import type { ImportedFile } from "@/utils/projects-store";
-import { listProjects, deleteProject, deleteVersion, formatRelativeTime, formatVersionTime, type Project, type ProjectVersion } from "@/utils/projects-store";
+import { listProjects, deleteProject, deleteVersion, formatRelativeTime, formatVersionTime, getVersions, type Project, type ProjectVersion } from "@/utils/projects-store";
 
 interface SidebarProps {
   onGitHubImport: () => void;
@@ -79,10 +79,41 @@ type SidebarTab = "files" | "projects" | "versions";
 function ProjectsList({ currentProjectId, onNewProject }: { currentProjectId: string | null; onNewProject: () => void }) {
   const navigate = useNavigate();
   const [projects, setProjects] = useState<Project[]>([]);
+  const [loading, setLoading] = useState(true);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
-  useEffect(() => { setProjects(listProjects()); }, [currentProjectId]);
+
+  const loadProjects = async () => {
+    setLoading(true);
+    const list = await listProjects();
+    setProjects(list);
+    setLoading(false);
+  };
+
+  useEffect(() => { loadProjects(); }, [currentProjectId]);
+
   const handleOpen = (project: Project) => { navigate(`/workspace?id=${project.id}`); };
-  const handleDelete = (e: React.MouseEvent, id: string) => { e.stopPropagation(); if (deleteConfirm === id) { deleteProject(id); setProjects(listProjects()); setDeleteConfirm(null); if (id === currentProjectId) navigate("/workspace"); } else { setDeleteConfirm(id); setTimeout(() => setDeleteConfirm(null), 3000); } };
+  const isEmptyProject = (project: Project): boolean => {
+    return !project.generatedCode && (!project.conversationHistory || project.conversationHistory.length === 0) && (!project.importedFiles || project.importedFiles.length === 0);
+  };
+  const handleDelete = async (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    if (deleteConfirm === id) {
+      await deleteProject(id);
+      // If the deleted project was the current one, navigate to workspace
+      if (id === currentProjectId) {
+        navigate("/workspace");
+      }
+      // Reload the project list
+      await loadProjects();
+      setDeleteConfirm(null);
+    } else {
+      setDeleteConfirm(id);
+      // Auto-clear confirm after 5 seconds
+      setTimeout(() => setDeleteConfirm(null), 5000);
+    }
+  };
+
+  if (loading) return <div className="flex items-center justify-center py-10"><div className="w-5 h-5 border-2 border-background-400 border-t-foreground-300 rounded-full animate-spin" /></div>;
 
   if (projects.length === 0) return <div className="flex flex-col items-center justify-center py-10 px-4 text-center"><div className="w-10 h-10 flex items-center justify-center rounded-xl bg-background-200/60 mb-3"><i className="ri-folder-open-line text-foreground-500 text-lg" /></div><p className="text-xs text-foreground-600 mb-3 leading-relaxed">No saved projects yet. Build something to save it automatically.</p><button onClick={onNewProject} className="text-xs text-accent-400 border border-accent-500/30 rounded-lg px-3 py-1.5 hover:bg-accent-500/10 transition-colors cursor-pointer whitespace-nowrap">Start new project</button></div>;
 
@@ -103,11 +134,14 @@ function ProjectsList({ currentProjectId, onNewProject }: { currentProjectId: st
               {project.versions.length > 0 && <><span>·</span><span>{project.versions.length}v</span></>}
             </div>
           </div>
-          <button onClick={(e) => handleDelete(e, project.id)} className={`flex-shrink-0 w-5 h-5 flex items-center justify-center rounded-md transition-colors cursor-pointer opacity-0 group-hover:opacity-100 ${deleteConfirm === project.id ? "bg-red-500/20 text-red-400" : "hover:bg-background-300/60 text-foreground-500"}`}>
-            <i className={`text-[10px] ${deleteConfirm === project.id ? "ri-alert-line" : "ri-delete-bin-line"}`} />
+          <button onClick={(e) => handleDelete(e, project.id)} className={`flex-shrink-0 flex items-center gap-1 rounded-md transition-all cursor-pointer opacity-0 group-hover:opacity-100 ${deleteConfirm === project.id ? "bg-red-500 text-background-50 px-2 py-1 text-[10px] font-medium opacity-100" : "w-5 h-5 justify-center hover:bg-background-300/60 text-foreground-500"}`}>
+            {deleteConfirm === project.id ? (
+              <><i className="ri-alert-line text-[10px]" /> Confirm</>
+            ) : (
+              <i className="ri-delete-bin-line text-[10px]" />
+            )}
           </button>
         </div>
-        {isActive && <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] bg-accent-500/15 text-accent-400 border border-accent-500/20 rounded-full px-1.5 py-0.5">open</span>}
       </button>;
     })}
   </div>;
@@ -118,7 +152,16 @@ function VersionsList({ versions, activeVersionId, onRestore, onPreview }: { ver
   const [restoreConfirm, setRestoreConfirm] = useState<string | null>(null);
   const [previewingId, setPreviewingId] = useState<string | null>(null);
   if (versions.length === 0) return <div className="flex flex-col items-center justify-center py-10 px-4 text-center"><div className="w-10 h-10 flex items-center justify-center rounded-xl bg-background-200/60 mb-3"><i className="ri-git-branch-line text-foreground-500 text-lg" /></div><p className="text-xs text-foreground-600 mb-1 leading-relaxed">No versions yet</p><p className="text-[10px] text-foreground-600 leading-relaxed">Each time the AI builds or updates your app, a restore point is saved automatically.</p></div>;
-  const handleDelete = (e: React.MouseEvent, vId: string) => { e.stopPropagation(); if (deleteConfirm === vId) { deleteVersion(versions[0]?.projectId || "", vId); setDeleteConfirm(null); } else { setDeleteConfirm(vId); setTimeout(() => setDeleteConfirm(null), 3000); } };
+  const handleDelete = async (e: React.MouseEvent, vId: string) => {
+    e.stopPropagation();
+    if (deleteConfirm === vId) {
+      await deleteVersion(versions[0]?.projectId || "", vId);
+      setDeleteConfirm(null);
+    } else {
+      setDeleteConfirm(vId);
+      setTimeout(() => setDeleteConfirm(null), 3000);
+    }
+  };
   const handleRestore = (e: React.MouseEvent, version: ProjectVersion) => { e.stopPropagation(); if (restoreConfirm === version.id) { onRestore(version.id); setRestoreConfirm(null); } else { setRestoreConfirm(version.id); setTimeout(() => setRestoreConfirm(null), 4000); } };
   const handlePreview = (e: React.MouseEvent, version: ProjectVersion) => { e.stopPropagation(); if (previewingId === version.id) { setPreviewingId(null); onRestore(activeVersionId || ""); } else { setPreviewingId(version.id); onPreview(version.id); } };
   const currentVersionId = activeVersionId || versions[0]?.id;
@@ -132,15 +175,16 @@ function VersionsList({ versions, activeVersionId, onRestore, onPreview }: { ver
         {index < versions.length - 1 && <div className="absolute left-[18px] top-9 bottom-0 w-px bg-background-300/30" />}
         <div className="flex items-start gap-2.5">
           <div className="flex-shrink-0 mt-1 relative"><span className={`w-2 h-2 rounded-full block ${isCurrent ? "bg-accent-500" : isPreviewing ? "bg-accent-400 ring-2 ring-accent-500/20" : "bg-foreground-600"}`} /></div>
-          <div className="flex-1 min-w-0"><p className={`text-xs leading-snug mb-0.5 line-clamp-2 ${isCurrent ? "text-foreground-800 font-medium" : "text-foreground-500"}`} title={version.label}>{version.label}</p><span className="text-[10px] text-foreground-500">{formatVersionTime(version.timestamp)}</span></div>
+          <div className="flex-1 min-w-0">
+            {version.versionNumber && <span className="text-[9px] font-mono text-foreground-500 bg-background-200/60 border border-background-300/40 rounded px-1 py-0.5 mr-1.5">v{version.versionNumber}</span>}
+            <p className={`text-xs leading-snug mb-0.5 line-clamp-2 inline ${isCurrent ? "text-foreground-800 font-medium" : "text-foreground-500"}`} title={version.label}>{version.label}</p>
+            <div className="flex items-center gap-2 mt-0.5"><span className="text-[10px] text-foreground-500">{formatVersionTime(version.timestamp)}</span></div>
+          </div>
           {isCurrent && <span className="flex-shrink-0 text-[9px] bg-accent-500/15 text-accent-400 border border-accent-500/20 rounded-full px-1.5 py-0.5">active</span>}
           {isPreviewing && !isCurrent && <span className="flex-shrink-0 text-[9px] bg-accent-500/15 text-accent-400 border border-accent-500/20 rounded-full px-1.5 py-0.5">preview</span>}
         </div>
         <div className="flex items-center gap-1 mt-2 ml-[22px] opacity-0 group-hover:opacity-100 transition-opacity">
-          {!isCurrent && <>
-            <button onClick={(e) => handlePreview(e, version)} className={`text-[10px] px-2 py-0.5 rounded-md transition-colors cursor-pointer whitespace-nowrap ${isPreviewing ? "bg-accent-500/20 text-accent-400" : "text-foreground-500 hover:text-foreground-800 hover:bg-background-200/60"}`}>{isPreviewing ? <span className="flex items-center gap-1"><i className="ri-eye-off-line text-[9px]" />Close</span> : <span className="flex items-center gap-1"><i className="ri-eye-line text-[9px]" />Preview</span>}</button>
-            <button onClick={(e) => handleRestore(e, version)} className={`text-[10px] px-2 py-0.5 rounded-md transition-colors cursor-pointer whitespace-nowrap ${restoreConfirm === version.id ? "bg-accent-500/20 text-accent-400" : "text-foreground-500 hover:text-accent-400 hover:bg-accent-500/10"}`}>{restoreConfirm === version.id ? <span className="flex items-center gap-1"><i className="ri-alert-line text-[9px]" />Confirm restore</span> : <span className="flex items-center gap-1"><i className="ri-arrow-go-back-line text-[9px]" />Restore</span>}</button>
-          </>}
+          {!isCurrent && <><button onClick={(e) => handlePreview(e, version)} className={`text-[10px] px-2 py-0.5 rounded-md transition-colors cursor-pointer whitespace-nowrap ${isPreviewing ? "bg-accent-500/20 text-accent-400" : "text-foreground-500 hover:text-foreground-800 hover:bg-background-200/60"}`}>{isPreviewing ? <span className="flex items-center gap-1"><i className="ri-eye-off-line text-[9px]" />Close</span> : <span className="flex items-center gap-1"><i className="ri-eye-line text-[9px]" />Preview</span>}</button><button onClick={(e) => handleRestore(e, version)} className={`text-[10px] px-2 py-0.5 rounded-md transition-colors cursor-pointer whitespace-nowrap ${restoreConfirm === version.id ? "bg-accent-500/20 text-accent-400" : "text-foreground-500 hover:text-accent-400 hover:bg-accent-500/10"}`}>{restoreConfirm === version.id ? <span className="flex items-center gap-1"><i className="ri-alert-line text-[9px]" />Confirm restore</span> : <span className="flex items-center gap-1"><i className="ri-arrow-go-back-line text-[9px]" />Restore</span>}</button></>}
           <button onClick={(e) => handleDelete(e, version.id)} className={`text-[10px] px-2 py-0.5 rounded-md transition-colors cursor-pointer whitespace-nowrap ml-auto ${deleteConfirm === version.id ? "bg-red-500/20 text-red-400" : "text-foreground-500 hover:text-red-400 hover:bg-red-500/10"}`}>{deleteConfirm === version.id ? <span className="flex items-center gap-1"><i className="ri-alert-line text-[9px]" />Confirm</span> : <span className="flex items-center gap-1"><i className="ri-delete-bin-line text-[9px]" /></span>}</button>
         </div>
       </div>;

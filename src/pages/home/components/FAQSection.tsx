@@ -7,7 +7,7 @@ const faqs = [
   { q: "How is CreAIlity different from other AI coding tools?", a: "Most AI tools generate code snippets or answer questions. CreAIlity generates entire, working applications from a single prompt — with routing, state management, responsive design, and polished UI all included." },
   { q: "Is the generated code really production-ready?", a: "Yes. CreAIlity focuses on code quality, not just code quantity. You get TypeScript types, component splitting, semantic HTML, accessibility considerations, and responsive layouts." },
   { q: "What about connecting to a backend or database?", a: "CreAIlity can scaffold integrations with Supabase for authentication and database, Stripe for payments, and REST or GraphQL APIs." },
-  { q: "How much does CreAIlity cost?", a: "CreAIlity offers a free tier that lets you build and preview apps. Paid plans unlock unlimited builds, custom domains, and team collaboration features." },
+  { q: "How much does CreAIlity cost?", a: "CreAIlity offers a free tier that lets you build and preview apps. Paid plans unlock unlimited projects, custom domains, and team collaboration features." },
   { q: "Can multiple people work on the same project?", a: "Yes! Team plans allow multiple collaborators on a project. Each team member can prompt changes, and all edits are versioned." },
 ];
 
@@ -37,8 +37,13 @@ export default function FAQSection() {
       <div className="max-w-6xl mx-auto">
         <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-10 mb-14">
           <div className="md:w-72 flex-shrink-0">
-            <p className="text-xs font-medium text-foreground-600 uppercase tracking-widest mb-4">FAQ</p>
-            <h2 className="font-heading text-4xl md:text-5xl font-bold text-foreground-950 leading-tight mb-4">Got questions?</h2>
+            <p className="text-xs font-medium text-accent-500 uppercase tracking-widest mb-4">FAQ</p>
+            <h2 className="font-display text-4xl md:text-5xl font-bold leading-tight mb-4">
+              Got{" "}
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-cyan-400 to-blue-500">
+                questions?
+              </span>
+            </h2>
             <p className="text-sm text-foreground-500 leading-relaxed">Everything you need to know about building with CreAIlity. Can&apos;t find the answer? Chat with our team.</p>
             <div className="flex gap-3 mt-6 flex-wrap">
               <a href="#" className="inline-flex items-center gap-2 text-sm font-medium text-foreground-800 border border-foreground-600/50 rounded-full px-4 py-2 hover:border-foreground-400 hover:bg-foreground-400/10 transition-colors cursor-pointer whitespace-nowrap"><i className="ri-customer-service-line text-sm" />Talk to us</a>
