@@ -24,16 +24,20 @@ const deviceSizes: Record<DeviceMode, { w: string; label: string; icon: string }
 const defaultPreviewHtml = `<!DOCTYPE html>\n<html lang="en" class="dark">\n<head>\n  <meta charset="UTF-8">\n  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n  <script src="https://cdn.tailwindcss.com"></script>\n  <link href="https://cdn.jsdelivr.net/npm/remixicon@4.5.0/fonts/remixicon.css" rel="stylesheet">\n  <script>tailwind.config={darkMode:'class'}</script>\n  <style>body{font-family:Inter,system-ui,sans-serif;margin:0;background:#0a0a0b;color:#e4e4e7;}</style>\n</head>\n<body>\n  <div class="min-h-screen bg-gray-950 flex items-center justify-center">\n    <div class="text-center px-6">\n      <div class="w-16 h-16 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-gray-700 to-gray-800 flex items-center justify-center"><i class="ri-sparkling-2-line text-3xl text-gray-300"></i></div>\n      <h1 class="text-2xl font-semibold text-gray-200 mb-2">Ready to build</h1>\n      <p class="text-gray-500 max-w-md leading-relaxed">Describe the app you want in the chat panel and your AI builder will generate it here in real time.</p>\n    </div>\n  </div>\n</body>\n</html>`;
 
 function useBlobUrl(html: string | null): string {
-  const blobUrlRef = useRef<string | null>(null);
-  const url = useMemo(() => {
-    if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
+  const [url, setUrl] = useState<string>("");
+
+  useEffect(() => {
     const source = html || defaultPreviewHtml;
     const blob = new Blob([source], { type: "text/html;charset=utf-8" });
-    blobUrlRef.current = URL.createObjectURL(blob);
-    return blobUrlRef.current;
+    const objectUrl = URL.createObjectURL(blob);
+    setUrl(objectUrl);
+
+    return () => {
+      URL.revokeObjectURL(objectUrl);
+    };
   }, [html]);
-  useEffect(() => { return () => { if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current); }; }, []);
-  return url;
+
+  return url || "about:blank";
 }
 
 function CodeEditor({ code, onSave, fileName }: { code: string; onSave: (updated: string) => void; fileName?: string }) {
@@ -136,8 +140,8 @@ export default function PreviewPanel({ isBuilding, generatedCode, isViewingVersi
 
     {viewMode === "preview" && (canPreview || (hasSandbox && isSandboxActive)) ? (
       <div className="flex-1 overflow-auto flex items-start justify-center p-4 min-h-0">
-        <div className="h-full rounded-xl overflow-hidden border border-background-300/60 relative transition-all duration-300 bg-white" style={{ width: deviceSizes[device].w, minHeight: "500px" }}>
-          {isBuilding && <div className="absolute inset-0 z-10 bg-white/80 backdrop-blur-sm flex flex-col items-center justify-center gap-3"><div className="w-8 h-8 border-2 border-background-300 border-t-foreground-400 rounded-full animate-spin" /><p className="text-xs text-foreground-500 font-medium">Building your app...</p></div>}
+        <div className="h-full rounded-xl overflow-hidden border border-background-300/60 relative transition-all duration-300 bg-background-950" style={{ width: deviceSizes[device].w, minHeight: "500px" }}>
+          {isBuilding && <div className="absolute inset-0 z-10 bg-background-950/70 backdrop-blur-sm flex flex-col items-center justify-center gap-3"><div className="w-8 h-8 border-2 border-background-400/60 border-t-foreground-300 rounded-full animate-spin" /><p className="text-xs text-foreground-400 font-medium">Building your app...</p></div>}
           <iframe key={refreshKey} src={iframeUrl} className="w-full h-full border-0" title="App Preview" sandbox="allow-scripts allow-same-origin" />
         </div>
       </div>

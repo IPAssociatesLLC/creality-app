@@ -1,75 +1,44 @@
-import { useState, useEffect, useCallback } from "react";
-import { supabase } from "@/lib/supabase";
-import type { User, Session } from "@supabase/supabase-js";
-import type { UserPlan } from "@/utils/projects-store";
-import { getUserPlan } from "@/utils/projects-store";
+import { Link } from "react-router-dom";
 
-export function useAuth() {
-  const [user, setUser] = useState<User | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [plan, setPlan] = useState<UserPlan | null>(null);
-  const [planLoading, setPlanLoading] = useState(false);
-
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session: s } }) => {
-      setSession(s);
-      setUser(s?.user ?? null);
-      setLoading(false);
-      if (s?.user) {
-        setPlanLoading(true);
-        getUserPlan().then(setPlan).finally(() => setPlanLoading(false));
-      }
-    });
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, s) => {
-      setSession(s);
-      setUser(s?.user ?? null);
-      setLoading(false);
-      if (s?.user) {
-        setPlanLoading(true);
-        getUserPlan().then(setPlan).finally(() => setPlanLoading(false));
-      } else {
-        setPlan(null);
-      }
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
-
-<<<<<<< HEAD:src/components/feature/SubPageNavBar.tsx
-  const signIn = useCallback(async (email: string, password: string) => {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    if (data?.user) {
-      setPlanLoading(true);
-      getUserPlan().then(setPlan).finally(() => setPlanLoading(false));
-    }
-    return { data, error };
-  }, []);
-
-  const signUp = useCallback(async (email: string, password: string) => {
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-    });
-    return { data, error };
-  }, []);
-
-  const signOut = useCallback(async () => {
-    await supabase.auth.signOut();
-    setUser(null);
-    setSession(null);
-    setPlan(null);
-  }, []);
-
-  return { user, session, loading, plan, planLoading, signIn, signUp, signOut };
+interface SubPageNavbarProps {
+  currentPage?: "features" | "pricing" | "docs" | "terms" | "privacy" | "contact";
 }
-=======
+
+const navLinks = [
+  { label: "Home", href: "/" },
+  { label: "Features", href: "/features" },
+  { label: "Pricing", href: "/pricing" },
+  { label: "Docs", href: "/docs" },
+];
+
+export default function SubPageNavbar({ currentPage }: SubPageNavbarProps) {
+  return (
+    <nav className="fixed top-0 left-0 right-0 z-50 bg-background-50/90 backdrop-blur-xl border-b border-background-200">
+      <div className="flex items-center justify-between h-14 px-6">
+        <Link to="/" className="flex items-center flex-shrink-0 cursor-pointer">
+          <img
+            src="https://storage.readdy-site.link/project_files/c6e462cf-b14b-45cb-80da-88f2eb6a9c28/fbdcb9b1-2ade-459a-af68-f0b38e142f9e_CreAIlity-app-logo.png"
+            alt="CreAIlity"
+            className="h-8 w-auto object-contain"
+          />
+        </Link>
+
+        <div className="hidden sm:flex items-center gap-1">
+          {navLinks.map((link) => (
+            <Link
+              key={link.label}
+              to={link.href}
+              className={`text-sm px-3 py-1.5 rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
+                currentPage && link.label.toLowerCase() === currentPage
+                  ? "text-foreground-900 font-medium bg-background-200/60"
+                  : "text-foreground-600 hover:text-foreground-800 hover:bg-background-200/30"
+              }`}
+            >
+              {link.label}
+            </Link>
+          ))}
+        </div>
+
         <div className="flex items-center gap-3">
           <Link
             to="/contact"
@@ -89,4 +58,3 @@ export function useAuth() {
     </nav>
   );
 }
->>>>>>> 87e5fc36fda9c4c7d6bde44684e3e0aa3f7a08f2:src/components/feature/SubPageNavbar.tsx

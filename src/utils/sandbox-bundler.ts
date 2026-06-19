@@ -144,9 +144,9 @@ function transformSourceFile(content: string, fileName: string): string {
     },
   );
 
-  // ── Remove local file imports (dependencies are concatenated) ──
+  // ── Remove local and aliased file imports (dependencies are concatenated) ──
   result = result.replace(
-    /import\s+(?:type\s+)?(?:\{[^}]*\}|\w+|\*\s+as\s+\w+)?\s*(?:,\s*(?:\{[^}]*\}|\w+))?\s*from\s*['"]\.\.?\/[^'"]+['"];?\s*/g,
+    /import\s+(?:type\s+)?(?:\{[^}]*\}|\w+|\*\s+as\s+\w+)?\s*(?:,\s*(?:\{[^}]*\}|\w+))?\s*from\s*['"](?:\.\.?\/|@\/)[^'"]+['"];?\s*/g,
     "",
   );
 

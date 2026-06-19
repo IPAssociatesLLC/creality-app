@@ -410,14 +410,13 @@ export function buildProjectContext(files: ImportedFile[], generatedCode?: strin
   const parts: string[] = [];
 
   if (generatedCode) {
-    parts.push(`[Generated HTML (single-file app)]\nLength: ${generatedCode.length} chars\nPreview: ${generatedCode.slice(0, 300)}...`);
+    parts.push(`[Generated HTML (single-file app)]\nLength: ${generatedCode.length} chars\n\`\`\`html\n${generatedCode}\n\`\`\``);
   }
 
   if (files && files.length > 0) {
     parts.push(`[Project Files — ${files.length} total]`);
     for (const file of files) {
-      const preview = file.content.slice(0, 200).replace(/\n/g, " ");
-      parts.push(`  ${file.name} (${file.language}, ${file.content.length} chars): ${preview}...`);
+      parts.push(`\n--- FILE: ${file.name} ---\n\`\`\`${file.language}\n${file.content}\n\`\`\``);
     }
   }
 
@@ -431,8 +430,6 @@ export interface UserPlan {
   status: "active" | "trial" | "cancelled" | "expired";
   creditsRemaining: number;
   creditsMonthly: number;
-  buildsUsedThisMonth: number;
-  buildsLimitMonthly: number;
   projectsLimit: number;
 }
 
@@ -454,8 +451,6 @@ export async function getUserPlan(): Promise<UserPlan | null> {
       status: data.status as UserPlan["status"],
       creditsRemaining: data.credits_remaining as number,
       creditsMonthly: data.credits_monthly as number,
-      buildsUsedThisMonth: data.builds_used_this_month as number,
-      buildsLimitMonthly: data.builds_limit_monthly as number,
       projectsLimit: data.projects_limit as number,
     };
   } catch (err) {
@@ -464,12 +459,7 @@ export async function getUserPlan(): Promise<UserPlan | null> {
   }
 }
 
-export async function incrementBuildCount(): Promise<void> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return;
-
-  await supabase.rpc("increment_build_count");
-}
+// incrementBuildCount has been removed
 
 function defaultFreePlan(): UserPlan {
   return {
@@ -477,8 +467,6 @@ function defaultFreePlan(): UserPlan {
     status: "active",
     creditsRemaining: 20,
     creditsMonthly: 20,
-    buildsUsedThisMonth: 0,
-    buildsLimitMonthly: 20,
     projectsLimit: 3,
   };
 }
@@ -517,13 +505,8 @@ export async function checkCanBuild(): Promise<{ allowed: boolean; reason: strin
   // Hosting: no builds allowed
   if (plan.tier === "hosting") return { allowed: false, reason: "Hosting plan does not include AI credits. Upgrade to Pro or BYOK to build apps." };
 
-  // Free: check builds remaining
-  if (plan.tier === "free" && plan.buildsUsedThisMonth >= plan.buildsLimitMonthly) {
-    return { allowed: false, reason: `You've used all ${plan.buildsLimitMonthly} free credits this month. Upgrade to continue.` };
-  }
-
-  // Check credits remaining
-  if (plan.creditsRemaining <= 0 && plan.tier !== "byok") {
+  // Check credits remaining (applies to Free and Pro)
+  if (plan.creditsRemaining <= 0) {
     return { allowed: false, reason: `You're out of credits. Your plan resets monthly with ${plan.creditsMonthly} credits.` };
   }
 

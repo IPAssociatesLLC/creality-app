@@ -14,6 +14,7 @@ const WEB_APP_SYSTEM_PROMPT = `You are CreAIlity — an elite full-stack AI soft
 CRITICAL OUTPUT RULES
 ═══════════════════════════════════════
 Generate ONE complete, self-contained HTML file. It must work immediately when opened in any browser — no build step, no server needed.
+CRITICAL: Keep your code concise! If the user requests a complex app, build the core features first. Generating extremely long code blocks will cause the connection to time out.
 
 CDN DEPENDENCIES (ONLY these, no exceptions):
 - React 19 from ESM CDN:
@@ -172,13 +173,14 @@ Every page must include:
 IMPORT / EDIT EXISTING CODE
 ───────────────────────────────────────
 
-When the user provides existing code to edit:
+When the user provides existing code to edit or import:
 1. ANALYZE the code first — understand its structure, components, styling
 2. PRESERVE existing patterns — match the code's existing style, naming conventions, and architecture
 3. MAKE targeted changes — only modify what the user asks for, don't rewrite everything
-4. EXPLAIN changes clearly — note what was modified and why
-5. RETURN the COMPLETE updated file — never return diffs or partial code
-6. When multiple files provided: return ALL files (unchanged ones too) in the output
+4. OUTPUT BUILD COMMANDS — Always output a \`\`\`bash\`\`\` code block containing the commands needed to run the imported project (e.g., \`npm install\` and \`npm run dev\`), so the user can deploy it to the preview container.
+5. EXPLAIN changes clearly — note what was modified and why
+6. RETURN the COMPLETE updated file — never return diffs or partial code
+7. When multiple files provided: return ALL files (unchanged ones too) in the output
 
 When importing from GitHub or ZIP:
 - Analyze the full project structure first
@@ -505,16 +507,15 @@ REQUIRED FILES (always include):
 - src/index.css — @tailwind directives + global styles + CSS custom properties
 - src/vite-env.d.ts — Vite type references
 
-GENERATE 8-20 ADDITIONAL FILES based on app complexity:
-- src/components/ui/ — Reusable UI primitives (Button, Input, Card, Modal, Badge, Avatar, etc.)
-- src/components/layout/ — Layout components (Navbar, Sidebar, Footer, PageShell)
-- src/components/feature/ — Feature-specific components (auth, payments, chat, etc.)
-- src/pages/ — Page components (HomePage, DashboardPage, SettingsPage, etc.)
-- src/hooks/ — Custom hooks (useAuth, useData, useForm, useMediaQuery, etc.)
-- src/lib/ — Utility/configuration modules (supabase client, api client, constants, types)
-- src/types/ — TypeScript type definitions and interfaces
-- src/data/ — Mock data files with realistic content
-- src/router/config.tsx — Route definitions (lazy loaded where appropriate)
+GENERATE 2-5 ESSENTIAL FILES based on app complexity:
+CRITICAL: Do not exceed 5-7 total files. Generating too many files will cause the Edge Function to time out.
+CRITICAL: ALL imports MUST use relative paths (e.g. './' or '../'). DO NOT use '@/' path aliases, as they are not supported by the preview bundler.
+
+- src/components/ — Reusable components
+- src/pages/ — Page components
+- src/hooks/ — Custom hooks
+- src/lib/ — Utility modules
+- src/data/ — Mock data files
 
 ───────────────────────────────────────
 DESIGN SYSTEM — DARK THEME
@@ -800,8 +801,19 @@ export async function generateCode({ config, prompt, conversationHistory, buildM
 
   onStep?.("Sending request to AI...");
 
-  const { data, error } = await supabase.functions.invoke("ai-proxy", {
-    body: {
+  const { data: sessionData } = await supabase.auth.getSession();
+  const token = sessionData?.session?.access_token || "";
+
+  const supabaseUrl = "https://qyyfygcflzyfucypmfeu.supabase.co";
+  if (!supabaseUrl) throw new Error("Missing Supabase URL");
+
+  const res = await fetch(`${supabaseUrl}/functions/v1/ai-proxy`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${token}`
+    },
+    body: JSON.stringify({
       modelId,
       prompt: userMessage,
       messages: conversationHistory,
@@ -810,16 +822,21 @@ export async function generateCode({ config, prompt, conversationHistory, buildM
       projectContext: projectContext || "",
       summary: conversationSummary || "",
       conversationId: conversationId || "",
-    },
+    })
   });
 
-  if (error) {
-    throw new Error(error.message || "AI proxy request failed");
+  if (!res.ok) {
+    let errMsg = "AI proxy request failed";
+    try {
+      const errBody = await res.json();
+      errMsg = errBody.error || errBody.message || `Status: ${res.status}`;
+    } catch {
+      errMsg = `Status: ${res.status} - ` + await res.text();
+    }
+    throw new Error(errMsg);
   }
 
-  if (data?.error) {
-    throw new Error(data.error);
-  }
+  const data = await res.json();
 
   onStep?.("Receiving generated code...");
 

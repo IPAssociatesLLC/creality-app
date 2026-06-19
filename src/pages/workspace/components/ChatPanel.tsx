@@ -3,7 +3,7 @@ import { examplePrompts, extensionExamplePrompts } from "@/mocks/workspace";
 import { loadConfig } from "@/utils/ai-api";
 import { AVAILABLE_MODELS, type StoredConfig } from "./ModelSelector";
 import { generateCode, extractExtensionFiles, getUserApiKeys, type ConversationMessage, type BuildMode } from "@/utils/ai-api";
-import { loadConversationMessages, saveMessage, optimizePrompt, getUserPlan, incrementBuildCount, getConversationSummary, checkCanBuild, getModelCreditCost, deductCredits, type UserPlan } from "@/utils/projects-store";
+import { loadConversationMessages, saveMessage, optimizePrompt, getUserPlan, getConversationSummary, checkCanBuild, getModelCreditCost, deductCredits, type UserPlan } from "@/utils/projects-store";
 import { supabase } from "@/lib/supabase";
 
 interface ChatPanelProps {
@@ -95,8 +95,6 @@ export default function ChatPanel({ onBuildStart, onBuildEnd, onGitHubImport, on
 
   const FREE_MODEL_IDS = ["gpt-4o"];
   const isModelLocked = userPlan?.tier === "free" && !FREE_MODEL_IDS.includes(config.selectedModel);
-  const buildsRemaining = userPlan ? userPlan.buildsLimitMonthly - userPlan.buildsUsedThisMonth : 0;
-  const canBuild = !userPlan || userPlan.tier !== "free" || buildsRemaining > 0;
 
   useEffect(() => {
     getUserApiKeys().then((keys) => {
@@ -175,10 +173,13 @@ export default function ChatPanel({ onBuildStart, onBuildEnd, onGitHubImport, on
     const hasClosingTag = /<\/[a-zA-Z][a-zA-Z0-9]*>/.test(code);
     const hasBodyTag = /<body[\s>]/i.test(code) || /<\/body>/i.test(code);
     const hasStyleContent = /<style[\s>]|<\/style>|<link\s/i.test(code);
-    // Reject obvious non-code (troubleshooting, advice, text-only)
-    const isAdviceText = /troubleshoot|check.*error|ensure.*correct|verify.*setup|inspect.*console|npm run|terminal|build error/i.test(code);
-    if (isAdviceText && !hasDoctype && !hasHtmlTag) return false;
-    return hasDoctype || hasHtmlTag || (hasTagStructure && hasClosingTag && (hasBodyTag || hasStyleContent || code.length > 300));
+    
+    // Only reject if it has VERY strong indicators of being a troubleshooting response WITH NO tags
+    const isAdviceText = /troubleshoot|check.*error|verify.*setup|inspect.*console|npm run|build error/i.test(code);
+    
+    if (isAdviceText && !hasDoctype && !hasHtmlTag && !hasTagStructure) return false;
+    
+    return hasDoctype || hasHtmlTag || (hasTagStructure && hasClosingTag && (hasBodyTag || hasStyleContent || code.length > 200));
   };
 
   const doBuild = useCallback(async (promptText: string) => {
@@ -202,11 +203,7 @@ export default function ChatPanel({ onBuildStart, onBuildEnd, onGitHubImport, on
       return;
     }
 
-    // Free tier build count check
-    if (userPlan?.tier === "free" && buildsRemaining <= 0) {
-      setUpgradeModalOpen(true);
-      return;
-    }
+    // Credits are handled via checkCanBuild and deductCredits.
 
     // Calculate credit cost: 3x for new builds (first message, no history), 1x for iterations
     const isNewBuild = conversationHistory.length === 0;
@@ -253,7 +250,6 @@ export default function ChatPanel({ onBuildStart, onBuildEnd, onGitHubImport, on
       // Save assistant message to Supabase
       if (conversationId) {
         saveMessage(conversationId, "assistant", rawOutput).catch(() => {});
-        incrementBuildCount().catch(() => {});
       }
 
       // Deduct credits (skip for BYOK - they use their own keys)
@@ -334,7 +330,7 @@ export default function ChatPanel({ onBuildStart, onBuildEnd, onGitHubImport, on
       setMessages((prev) => [...prev, { id: `msg-${Date.now()}-r`, role: "assistant", content: `Build failed: ${errMsg}`, timestamp: new Date(), status: "error" }]);
     }
     setThinking(false); setThinkLabel(""); onBuildEnd();
-  }, [thinking, config, conversationHistory, buildMode, onBuildStart, onBuildEnd, onCodeGenerated, onExtensionGenerated, onReactAppGenerated, onConversationUpdate, conversationId, userPlan, buildsRemaining, projectContext, conversationSummary]);
+  }, [thinking, config, conversationHistory, buildMode, onBuildStart, onBuildEnd, onCodeGenerated, onExtensionGenerated, onReactAppGenerated, onConversationUpdate, conversationId, userPlan, projectContext, conversationSummary]);
 
   const handleSend = () => { const text = input.trim(); if (!text || thinking) return; doBuild(text); };
   const handleRetry = () => { if (lastPrompt) { setMessages((prev) => prev.filter((m) => m.status !== "error")); doBuild(lastPrompt); } };
@@ -389,7 +385,7 @@ export default function ChatPanel({ onBuildStart, onBuildEnd, onGitHubImport, on
           <div className="flex items-center gap-1 text-[10px] bg-background-200/60 border border-background-300/40 rounded-full px-1.5 md:px-2 py-0.5">
             <span className={`w-1 h-1 rounded-full inline-block ${userPlan.tier === "free" ? "bg-foreground-500" : userPlan.tier === "pro" ? "bg-accent-500" : "bg-primary-500"}`} />
             <span className="text-foreground-600 capitalize hidden md:inline">{userPlan.tier}</span>
-            {userPlan.tier === "free" && <span className="text-foreground-500">· {buildsRemaining} credits</span>}
+            {userPlan.tier === "free" && <span className="text-foreground-500">· {userPlan.creditsRemaining} credits</span>}
           </div>
         )}
       </div>
@@ -438,7 +434,7 @@ export default function ChatPanel({ onBuildStart, onBuildEnd, onGitHubImport, on
       </div>
     </div>
 
-    {turnCount > 0 && <div className="flex-shrink-0 mx-2 md:mx-3 mt-2 flex items-center gap-1.5 md:gap-2 bg-secondary-500/10 border border-secondary-500/20 rounded-xl px-2 md:px-3 py-1.5 md:py-2"><i className="ri-refresh-line text-secondary-400 text-[10px] md:text-xs flex-shrink-0" /><p className="text-[10px] md:text-xs text-secondary-400">I remember your app — describe what to change and I&apos;ll update it.</p></div>}
+
 
     <div className="flex-1 overflow-y-auto px-3 md:px-4 py-3 md:py-4 flex flex-col gap-4 md:gap-5">
       {messages.length === 0 && !thinking && <div className="flex gap-3"><div className="w-7 h-7 flex-shrink-0 rounded-full overflow-hidden flex items-center justify-center mt-0.5 bg-background-200"><img src="https://storage.readdy-site.link/project_files/c6e462cf-b14b-45cb-80da-88f2eb6a9c28/fbdcb9b1-2ade-459a-af68-f0b38e142f9e_CreAIlity-app-logo.png" alt="C" className="w-full h-full object-contain p-0.5" /></div><div className="flex flex-col gap-3 max-w-[85%]"><div className="bg-background-100 border border-background-300/60 rounded-2xl rounded-bl-sm px-4 py-3"><p className="text-sm text-foreground-700 leading-relaxed">Describe the app you want to build. I&apos;ll generate the full code — HTML, CSS, JavaScript, everything. You can iterate on it, export it, or deploy it.</p></div><div className="flex flex-wrap gap-2"><button onClick={() => handleAction("Import from GitHub")} className="flex items-center gap-1.5 text-xs text-foreground-700 bg-background-100 border border-foreground-400/40 rounded-full px-3 py-1.5 hover:border-foreground-500 hover:text-foreground-950 hover:bg-background-200/60 transition-colors cursor-pointer whitespace-nowrap"><div className="w-3.5 h-3.5 flex items-center justify-center"><i className="ri-github-line text-xs" /></div>Import from GitHub</button><button onClick={() => handleAction("Upload project")} className="flex items-center gap-1.5 text-xs text-foreground-700 bg-background-100 border border-foreground-400/40 rounded-full px-3 py-1.5 hover:border-foreground-500 hover:text-foreground-950 hover:bg-background-200/60 transition-colors cursor-pointer whitespace-nowrap"><div className="w-3.5 h-3.5 flex items-center justify-center"><i className="ri-upload-cloud-line text-xs" /></div>Upload project</button></div></div></div>}
@@ -505,9 +501,7 @@ export default function ChatPanel({ onBuildStart, onBuildEnd, onGitHubImport, on
           </div>
           <h3 className="text-base font-bold text-foreground-900 text-center mb-1">Upgrade required</h3>
           <p className="text-xs text-foreground-600 text-center mb-4">
-            {userPlan?.tier === "free" && userPlan.buildsUsedThisMonth >= userPlan.buildsLimitMonthly
-              ? `You've used all ${userPlan.buildsLimitMonthly} free credits this month.`
-              : userPlan?.status === "cancelled" || userPlan?.status === "expired"
+            {userPlan?.status === "cancelled" || userPlan?.status === "expired"
                 ? `Your ${userPlan?.tier} subscription has ${userPlan?.status}. Renew to continue.`
                 : userPlan?.tier === "hosting"
                   ? "Hosting plan doesn't include AI credits."

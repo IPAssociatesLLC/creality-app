@@ -146,13 +146,16 @@ export default function WorkspacePage() {
   }, [idFromUrl]);
 
   const persistProject = useCallback(
-    async (updates: Partial<Project>) => {
-      if (!project) return;
-      const updated = { ...project, ...updates };
-      setProject(updated);
-      await saveProject(updated);
+    (updates: Partial<Project>) => {
+      setProject((prev) => {
+        if (!prev) return prev;
+        const updated = { ...prev, ...updates };
+        // Fire and forget save to Supabase to prevent blocking UI
+        saveProject(updated).catch(console.error);
+        return updated;
+      });
     },
-    [project]
+    []
   );
 
   const handleProjectNameChange = (name: string) => {
@@ -524,6 +527,7 @@ export default function WorkspacePage() {
           }`}
             style={{ width: activePanel === "both" && !mobilePreviewActive ? `${chatPanelWidth}px` : undefined }}>
             <ChatPanel
+              key={project.id}
               onBuildStart={() => setIsBuilding(true)}
               onBuildEnd={() => setIsBuilding(false)}
               onGitHubImport={() => setShowGitHub(true)}

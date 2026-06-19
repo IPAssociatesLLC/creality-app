@@ -721,9 +721,26 @@ function AiModelsTab() {
   const handleSaveKey = async (configKey: string, value: string) => {
     if (!value.trim()) return;
     setSavingKey(configKey);
-    const { data: existing } = await supabase.from("platform_config").select("id").eq("key", configKey).maybeSingle();
-    if (existing) { await supabase.from("platform_config").update({ value: value.trim(), updated_at: new Date().toISOString() }).eq("key", configKey); }
-    else { await supabase.from("platform_config").insert({ key: configKey, value: value.trim() }); }
+    const { data: existing, error: fetchErr } = await supabase.from("platform_config").select("key").eq("key", configKey).maybeSingle();
+    
+    let err = fetchErr;
+    if (!err) {
+      if (existing) { 
+        const { error } = await supabase.from("platform_config").update({ value: value.trim() }).eq("key", configKey); 
+        err = error;
+      } else { 
+        const { error } = await supabase.from("platform_config").insert({ key: configKey, value: value.trim() }); 
+        err = error;
+      }
+    }
+
+    if (err) {
+      setMsg(`Failed to save: ${err.message}`);
+      setTimeout(() => setMsg(null), 4000);
+      setSavingKey(null);
+      return;
+    }
+
     setKeys(prev => ({ ...prev, [configKey]: value }));
     setMsg(`Key saved for ${configKey}`);
     setTimeout(() => setMsg(null), 2000);
@@ -907,8 +924,8 @@ function SettingsTab() {
   }, []);
 
   const handleSave = async (key: string, value: string) => {
-    const { data: existing } = await supabase.from("platform_config").select("id").eq("key", key).maybeSingle();
-    if (existing) { await supabase.from("platform_config").update({ value, updated_at: new Date().toISOString() }).eq("key", key); }
+    const { data: existing } = await supabase.from("platform_config").select("key").eq("key", key).maybeSingle();
+    if (existing) { await supabase.from("platform_config").update({ value }).eq("key", key); }
     else { await supabase.from("platform_config").insert({ key, value }); }
     setMsg(`Saved!`); setTimeout(() => setMsg(null), 2000);
   };
