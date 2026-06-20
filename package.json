@@ -36,6 +36,7 @@
   "private": true,
   "scripts": {
     "build": "vite build",
+    "deploy-functions": "supabase functions deploy publish-sandbox --project-ref qyyfygcflzyfucypmfeu && supabase functions deploy deploy-worker --project-ref qyyfygcflzyfucypmfeu",
     "dev": "vite",
     "lint": "eslint src --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
