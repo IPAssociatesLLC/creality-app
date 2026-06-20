@@ -53,10 +53,17 @@ export default function WorkspacePage() {
   const mainAreaRef = useRef<HTMLDivElement>(null);
 
   const sandboxHtml = useMemo(() => {
-    if (!project?.importedFiles || project.importedFiles.length === 0) return null;
-    const result = buildSandboxHtml(project.importedFiles);
-    return result?.html ?? null;
-  }, [project?.importedFiles]);
+    if (project?.importedFiles && project.importedFiles.length > 0) {
+      const result = buildSandboxHtml(project.importedFiles);
+      return result?.html ?? null;
+    }
+    if (project?.generatedCode) {
+      const virtualFile = { name: "index.html", content: project.generatedCode, language: "html" };
+      const result = buildSandboxHtml([virtualFile]);
+      return result?.html ?? null;
+    }
+    return null;
+  }, [project?.importedFiles, project?.generatedCode]);
 
   const projectContext = useMemo(() => {
     if (!project) return "";
