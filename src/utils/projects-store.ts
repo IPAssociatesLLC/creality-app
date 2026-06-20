@@ -183,6 +183,31 @@ export async function saveVersion(
       prompt,
       version_number: nextNumber,
     });
+
+    // Also update the project row so the preview panel gets the latest code
+    try {
+      const parsed = JSON.parse(code);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        // Multi-file project — update imported_files
+        await supabase.from("projects").update({
+          generated_code: "",
+          imported_files: parsed,
+          updated_at: new Date().toISOString(),
+        }).eq("id", projectId).eq("user_id", userId);
+      } else {
+        // Assume single HTML string
+        await supabase.from("projects").update({
+          generated_code: code,
+          updated_at: new Date().toISOString(),
+        }).eq("id", projectId).eq("user_id", userId);
+      }
+    } catch {
+      // Not JSON — treat as generated code string
+      await supabase.from("projects").update({
+        generated_code: code,
+        updated_at: new Date().toISOString(),
+      }).eq("id", projectId).eq("user_id", userId);
+    }
   }
 
   return version;
