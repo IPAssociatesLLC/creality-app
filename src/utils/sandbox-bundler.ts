@@ -54,6 +54,17 @@ export function buildSandboxHtml(files: ImportedFile[]): BundledResult | null {
     htmlFile.content.includes("react") ||
     htmlFile.content.includes("root");
 
+  // Check if project uses Tailwind CSS
+  const hasTailwind =
+    files.some((f) => f.name.includes("tailwind.config")) ||
+    cssFiles.some((f) => f.content.includes("@tailwind")) ||
+    sourceFiles.some((f) => f.content.includes("tailwindcss"));
+
+  // Check if any source files use TypeScript
+  const hasTypeScript = sourceFiles.some(
+    (f) => f.name.endsWith(".ts") || f.name.endsWith(".tsx"),
+  );
+
   // Sort files: entry file last (so dependencies are defined first)
   const entryPatterns = ["main.", "index.", "app.", "App."];
   const sortedSourceFiles = [...sourceFiles].sort((a, b) => {
@@ -67,9 +78,15 @@ export function buildSandboxHtml(files: ImportedFile[]): BundledResult | null {
   // Transform source files into bundle-ready code
   const transformedBlocks = sortedSourceFiles.map((f) => transformSourceFile(f.content, f.name));
 
-  // Bundle CSS
+  // Bundle CSS — strip @tailwind directives (CDN handles them)
   const bundledCss = cssFiles
-    .map((f) => `/* ${f.name} */\n${f.content}`)
+    .map((f) => {
+      let css = f.content;
+      if (hasTailwind) {
+        css = css.replace(/@tailwind\s+[^;]+;\s*/g, "");
+      }
+      return `/* ${f.name} */\n${css}`;
+    })
     .join("\n\n");
 
   // Build composite HTML
@@ -78,6 +95,8 @@ export function buildSandboxHtml(files: ImportedFile[]): BundledResult | null {
     transformedBlocks.join("\n\n"),
     bundledCss,
     hasReact,
+    hasTailwind,
+    hasTypeScript,
   );
 
   return { html, hasReact, sourceFileCount: sourceFiles.length };
@@ -180,11 +199,19 @@ function buildCompositeHtml(
   bundledJs: string,
   bundledCss: string,
   hasReact: boolean,
+  hasTailwind: boolean,
+  hasTypeScript: boolean,
 ): string {
   let result = htmlContent;
 
   // Inject CDN scripts into <head>
   const headScripts: string[] = [];
+
+  // Tailwind CDN must come first so styles are available immediately
+  if (hasTailwind) {
+    headScripts.push('<script src="https://cdn.tailwindcss.com"></script>');
+    headScripts.push('<script>tailwind.config={darkMode:"class"}</script>');
+  }
 
   if (bundledCss) {
     headScripts.push(`<style>\n/* Bundled project CSS */\n${bundledCss}\n</style>`);
@@ -225,9 +252,15 @@ function buildCompositeHtml(
     "",
   );
 
+  // Build Babel presets based on what the project uses
+  const babelPresets: string[] = [];
+  if (hasReact) babelPresets.push("react");
+  if (hasTypeScript) babelPresets.push("typescript");
+  const presetsAttr = babelPresets.length > 0 ? ` data-presets="${babelPresets.join(",")}"` : "";
+
   // Inject bundled JS before </body>
-  const jsBlock = hasReact
-    ? `<script type="text/babel" data-presets="react">\n// ── Bundled project code ──\n(function() {\n"use strict";\n${bundledJs}\n})();\n</script>`
+  const jsBlock = hasReact || hasTypeScript
+    ? `<script type="text/babel"${presetsAttr}>\n// ── Bundled project code ──\n(function() {\n"use strict";\n${bundledJs}\n})();\n</script>`
     : `<script>\n// ── Bundled project code ──\n(function() {\n"use strict";\n${bundledJs}\n})();\n</script>`;
 
   if (result.includes("</body>")) {
