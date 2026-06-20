@@ -300,7 +300,6 @@ export default function WorkspacePage() {
     persistProject({ importedFiles: files });
     setActiveViewingFile(files[0].name);
     setViewingVersionCode(null);
-    setShowSandbox(false);
   };
 
   const handleReactAppGenerated = async (
@@ -321,7 +320,6 @@ export default function WorkspacePage() {
     setProject({ ...freshProject });
     setActiveViewingFile(files[0].name);
     setViewingVersionCode(null);
-    setShowSandbox(true);
   };
 
   const handleUploadedFiles = (
@@ -335,7 +333,6 @@ export default function WorkspacePage() {
     });
     setActiveViewingFile(files[0].name);
     setShowUpload(false);
-    setShowSandbox(true);
   };
 
   const previewCode = useMemo(() => {
