@@ -174,7 +174,7 @@ async function handleDeploy(request, env) {
 function jsonResponse(data, status) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { ...CORSM, "Content-Type": "application/json" },
+    headers: { ...CORS, "Content-Type": "application/json" },
   });
 }
 
