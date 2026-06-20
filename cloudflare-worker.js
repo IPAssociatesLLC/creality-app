@@ -107,6 +107,7 @@ function getContentType(path) {
 }
 
 // Deploy files to KV - SECURED
+async function handleDeploy(request, env) {
   try {
     const body = await request.json();
     const { slug, files, secret } = body;
