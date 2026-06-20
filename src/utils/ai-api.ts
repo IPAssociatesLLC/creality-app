@@ -261,6 +261,53 @@ export interface ExtensionFile {
   language: string;
 }
 
+/**
+ * Robustly extract a JSON object or array from text by counting braces.
+ * Handles code blocks (```json ... ```) and raw JSON with nested braces in string values.
+ */
+function extractJsonFromText(text: string): string | null {
+  // Try to find a JSON block delimiter first
+  const blockStart = text.match(/```(?:json)?\s*([\[\{])/);
+  let startChar: string | null = blockStart ? blockStart[1] : null;
+  let endChar: string | null = startChar === '[' ? ']' : startChar === '{' ? '}' : null;
+  
+  let startIdx: number;
+  if (startChar && endChar && blockStart) {
+    startIdx = blockStart.index! + blockStart[0].length - 1;
+  } else {
+    // No code block — try raw JSON at start of text
+    const rawMatch = text.match(/^\s*([\[\{])/);
+    if (!rawMatch) return null;
+    startChar = rawMatch[1];
+    endChar = startChar === '[' ? ']' : startChar === '{' ? '}' : null;
+    if (!endChar) return null;
+    startIdx = rawMatch.index! + rawMatch[0].length - 1;
+  }
+  
+  // Scan forward counting depth
+  let depth = 0;
+  let inString = false;
+  let escapeNext = false;
+  
+  for (let i = startIdx; i < text.length; i++) {
+    const ch = text[i];
+    
+    if (escapeNext) { escapeNext = false; continue; }
+    if (ch === '\\' && inString) { escapeNext = true; continue; }
+    if (ch === '"' && !escapeNext) { inString = !inString; continue; }
+    
+    if (!inString) {
+      if (ch === startChar) depth++;
+      else if (ch === endChar) {
+        depth--;
+        if (depth === 0) return text.slice(startIdx, i + 1);
+      }
+    }
+  }
+  
+  return null;
+}
+
 function parseFilesFromJson(parsed: unknown): ExtensionFile[] | null {
   if (Array.isArray(parsed)) {
     const files: ExtensionFile[] = [];
