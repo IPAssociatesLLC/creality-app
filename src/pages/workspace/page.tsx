@@ -182,8 +182,47 @@ export default function WorkspacePage() {
     const freshProject = await loadProject(project.id);
     if (!freshProject) return;
 
-    if (freshProject.importedFiles && freshProject.importedFiles.length > 0) {
-      // It's a multi-file project. Update index.html instead of generatedCode
+    // Detect multi-file JSON array/object responses from the AI
+    let parsedFiles: { name: string; content: string; language: string }[] | null = null;
+    try {
+      const parsed = JSON.parse(code);
+      if (Array.isArray(parsed) && parsed.length > 0 && "name" in parsed[0] && "content" in parsed[0]) {
+        parsedFiles = parsed as { name: string; content: string; language: string }[];
+      } else if (typeof parsed === "object" && !Array.isArray(parsed)) {
+        // { "filename": "content", ... } format
+        const entries = Object.entries(parsed as Record<string, unknown>);
+        if (entries.length > 0 && typeof entries[0][1] === "string") {
+          parsedFiles = entries.map(([name, content]) => {
+            const ext = name.split(".").pop()?.toLowerCase() || "";
+            const langMap: Record<string, string> = {
+              json: "json", js: "javascript", jsx: "javascript",
+              ts: "typescript", tsx: "typescript",
+              html: "html", css: "css", md: "markdown",
+            };
+            return { name, content: String(content), language: langMap[ext] || "plaintext" };
+          });
+        }
+      }
+    } catch {}
+
+    if (parsedFiles && parsedFiles.length > 0) {
+      // Multi-file project — merge with any existing files
+      const existingFiles = freshProject.importedFiles || [];
+      const mergedFiles = [...existingFiles];
+      for (const newFile of parsedFiles) {
+        const idx = mergedFiles.findIndex(f => f.name === newFile.name);
+        if (idx >= 0) mergedFiles[idx] = newFile;
+        else mergedFiles.push(newFile);
+      }
+      await saveVersion(project.id, JSON.stringify(mergedFiles), label, lastUserPrompt || "Build");
+      freshProject.importedFiles = mergedFiles;
+      freshProject.generatedCode = "";
+      await saveProject(freshProject);
+      setProject({ ...freshProject });
+      setViewingVersionCode(null);
+      setActiveViewingFile(parsedFiles[0].name);
+    } else if (freshProject.importedFiles && freshProject.importedFiles.length > 0) {
+      // Existing multi-file project. Update index.html content
       const updatedFiles = freshProject.importedFiles.map(f => 
         f.name === "index.html" ? { ...f, content: code } : f
       );
@@ -197,6 +236,7 @@ export default function WorkspacePage() {
       setViewingVersionCode(null);
       setActiveViewingFile("index.html");
     } else {
+      // Single-file output (HTML string) → generatedCode
       if (freshProject.generatedCode !== code) {
         await saveVersion(project.id, code, label, lastUserPrompt || "Build");
       }
