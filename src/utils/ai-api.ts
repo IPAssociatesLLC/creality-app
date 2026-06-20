@@ -261,12 +261,51 @@ export interface ExtensionFile {
   language: string;
 }
 
+function parseFilesFromJson(parsed: unknown): ExtensionFile[] | null {
+  if (Array.isArray(parsed)) {
+    const files: ExtensionFile[] = [];
+    for (const item of parsed) {
+      if (typeof item === "object" && item !== null && "name" in item && "content" in item) {
+        const obj = item as Record<string, unknown>;
+        const name = String(obj.name);
+        const content = String(obj.content);
+        const lang = String(obj.language || "");
+        const ext = name.split(".").pop()?.toLowerCase() || "";
+        const langMap: Record<string, string> = {
+          json: "json", js: "javascript", jsx: "javascript",
+          ts: "typescript", tsx: "typescript",
+          html: "html", css: "css", md: "markdown",
+        };
+        files.push({ name, content, language: lang || langMap[ext] || "plaintext" });
+      }
+    }
+    return files.length > 0 ? files : null;
+  }
+
+  if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+    const files: ExtensionFile[] = [];
+    for (const [filename, content] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof content !== "string") continue;
+      const ext = filename.split(".").pop()?.toLowerCase() || "";
+      const langMap: Record<string, string> = {
+        json: "json", js: "javascript", jsx: "javascript",
+        ts: "typescript", tsx: "typescript",
+        html: "html", css: "css", md: "markdown",
+      };
+      files.push({ name: filename, content, language: langMap[ext] || "plaintext" });
+    }
+    return files.length > 0 ? files : null;
+  }
+
+  return null;
+}
+
 export function extractExtensionFiles(text: string): ExtensionFile[] | null {
   // Strategy 1: explicit ```json block
-  let match = text.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+  let match = text.match(/```(?:json)?\s*((?:\[[\s\S]*?\]|\{[\s\S]*?\}))\s*```/);
   
   // Strategy 2: json inside generic code block
-  if (!match) match = text.match(/```\s*(\{[\s\S]*?\})\s*```/);
+  if (!match) match = text.match(/```\s*((?:\[[\s\S]*?\]|\{[\s\S]*?\}))\s*```/);
   
   // Strategy 3: raw JSON object at start of text
   // Strategy 4: per-file code blocks (e.g. ```tsx:src/App.tsx ... ```)
@@ -304,28 +343,25 @@ export function extractExtensionFiles(text: string): ExtensionFile[] | null {
   }
   
   if (!match) {
-    const startIdx = text.indexOf("{");
-    const endIdx = text.lastIndexOf("}");
-    if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+    // Try raw JSON array [...] in text
+    const arrStart = text.indexOf("[");
+    const arrEnd = text.lastIndexOf("]");
+    if (arrStart !== -1 && arrEnd !== -1 && arrEnd > arrStart) {
       try {
-        const parsed = JSON.parse(text.slice(startIdx, endIdx + 1));
-        if (typeof parsed === "object" && !Array.isArray(parsed)) {
-          const files: ExtensionFile[] = [];
-          for (const [filename, content] of Object.entries(parsed)) {
-            if (typeof content !== "string") continue;
-            const ext = filename.split(".").pop()?.toLowerCase() || "";
-            const langMap: Record<string, string> = {
-              json: "json", js: "javascript", jsx: "javascript",
-              ts: "typescript", tsx: "typescript",
-              html: "html", css: "css", md: "markdown",
-            };
-            files.push({ name: filename, content, language: langMap[ext] || "plaintext" });
-          }
-          return files.length > 0 ? files : null;
-        }
-      } catch {
-        // fall through to null
-      }
+        const parsed = JSON.parse(text.slice(arrStart, arrEnd + 1));
+        const files = parseFilesFromJson(parsed);
+        if (files) return files;
+      } catch { /* fall through */ }
+    }
+    // Try raw JSON object {...} in text
+    const objStart = text.indexOf("{");
+    const objEnd = text.lastIndexOf("}");
+    if (objStart !== -1 && objEnd !== -1 && objEnd > objStart) {
+      try {
+        const parsed = JSON.parse(text.slice(objStart, objEnd + 1));
+        const files = parseFilesFromJson(parsed);
+        if (files) return files;
+      } catch { /* fall through */ }
     }
   }
 
@@ -334,29 +370,9 @@ export function extractExtensionFiles(text: string): ExtensionFile[] | null {
 
   try {
     const parsed = JSON.parse(jsonStr);
-    if (typeof parsed !== "object" || Array.isArray(parsed)) return null;
-
-    const files: ExtensionFile[] = [];
-    for (const [filename, content] of Object.entries(parsed)) {
-      if (typeof content !== "string") continue;
-      const ext = filename.split(".").pop()?.toLowerCase() || "";
-      const langMap: Record<string, string> = {
-        json: "json",
-        js: "javascript",
-        jsx: "javascript",
-        ts: "typescript",
-        tsx: "typescript",
-        html: "html",
-        css: "css",
-        md: "markdown",
-      };
-      files.push({
-        name: filename,
-        content,
-        language: langMap[ext] || "plaintext",
-      });
-    }
-    return files.length > 0 ? files : null;
+    const files = parseFilesFromJson(parsed);
+    if (files) return files;
+    return null;
   } catch {
     console.warn("CreAIlity: Failed to parse AI response as multi-file JSON. Response starts with:", text.slice(0, 200));
     return null;
