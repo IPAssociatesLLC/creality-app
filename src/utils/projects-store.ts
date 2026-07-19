@@ -26,6 +26,7 @@ export interface Project {
   conversationHistory: ConversationMessage[];
   customDomain?: string;
   previewSlug?: string;
+  integrations?: Record<string, any>;
   versions: ProjectVersion[];
   activeVersionId: string | null;
   importedFiles: ImportedFile[];
@@ -64,6 +65,25 @@ export async function loadProject(id: string): Promise<Project | null> {
 
   if (error || !data) return null;
   return rowToProject(data as Record<string, unknown>);
+}
+
+export async function getProjectIntegrations(projectId: string): Promise<Record<string, any> | null> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+  const { data, error } = await supabase.from("projects").select("integrations").eq("id", projectId).eq("user_id", user.id).maybeSingle();
+  if (error || !data) return null;
+  return (data as any).integrations || null;
+}
+
+export async function saveProjectIntegrations(projectId: string, integrations: Record<string, any>): Promise<boolean> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return false;
+  const { error } = await supabase.from("projects").update({ integrations, updated_at: new Date().toISOString() }).eq("id", projectId).eq("user_id", user.id);
+  if (error) {
+    console.warn("CreAIlity: failed to save integrations", error);
+    return false;
+  }
+  return true;
 }
 
 export async function createProject(name: string): Promise<Project> {
@@ -118,6 +138,7 @@ export async function saveProject(project: Project): Promise<void> {
     generated_code: project.generatedCode,
     conversation_history: project.conversationHistory || [],
     imported_files: project.importedFiles || [],
+      integrations: project.integrations || null,
     preview_slug: project.previewSlug || project.id,
     custom_domain: project.customDomain || null,
     created_at: new Date(project.createdAt).toISOString(),
@@ -296,6 +317,7 @@ function rowToProject(row: Record<string, unknown>): Project | null {
     conversationHistory: (row.conversation_history as ConversationMessage[]) || [],
     previewSlug: (row.preview_slug as string) || (row.id as string),
     customDomain: (row.custom_domain as string) || undefined,
+    integrations: (row.integrations as Record<string, any>) || undefined,
     versions: [],
     activeVersionId: null,
     importedFiles: (row.imported_files as ImportedFile[]) || [],

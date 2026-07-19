@@ -11,7 +11,7 @@ interface BundledResult {
  * Handles: React components, JSX/TSX, CSS files, and inter-file imports.
  * Uses React 18 UMD + Babel standalone for in-browser JSX transformation.
  */
-export function buildSandboxHtml(files: ImportedFile[]): BundledResult | null {
+export function buildSandboxHtml(files: ImportedFile[], integrations?: Record<string, any>): BundledResult | null {
   if (!files || files.length === 0) return null;
 
   // Find entry HTML — prefer root index.html, then any index.html
@@ -138,6 +138,7 @@ export function buildSandboxHtml(files: ImportedFile[]): BundledResult | null {
       hasRouter,
       hasSupabase,
       hasLucide,
+      integrations,
     );
   };
 
@@ -348,11 +349,20 @@ function buildCompositeHtml(
   hasRouter: boolean,
   hasSupabase: boolean,
   hasLucide: boolean,
+  integrations?: Record<string, any>,
 ): string {
   let result = htmlContent;
 
   // Inject CDN scripts into <head>
   const headScripts: string[] = [];
+
+  // If integrations are provided, inject a small shim first so other scripts can read runtime config
+  if (integrations && Object.keys(integrations).length > 0) {
+    headScripts.push(`<script>window.__CREALITY_INTEGRATIONS__ = ${JSON.stringify(integrations)};</script>`);
+    headScripts.push(`
+<script>(function(){function init(){try{var cfg=(window.__CREALITY_INTEGRATIONS__||{}).supabase; if(cfg){ if(typeof createClient==='function'){ window.supabase = createClient(cfg.url, cfg.anonKey); } else if(window.supabase && typeof window.supabase.createClient === 'function'){ window.supabase = window.supabase.createClient(cfg.url, cfg.anonKey); } } }catch(e){} } if(document.readyState==='complete') init(); else window.addEventListener('load', init);})();</script>
+`);
+  }
 
   // ── Error Interceptor Script ──
   // Intercepts unhandled exceptions and console.errors (like Babel/React crashes)

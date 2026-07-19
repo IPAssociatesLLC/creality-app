@@ -20,6 +20,7 @@ interface ChatPanelProps {
   conversationId?: string | null;
   userPlan?: UserPlan | null;
   projectContext?: string;
+  initialBuildMode?: BuildMode;
 }
 
 interface ChatMessage {
@@ -60,14 +61,14 @@ const BUILD_MODES: { id: BuildMode; label: string; icon: string; desc: string }[
   { id: "import-edit", label: "Import & Edit", icon: "ri-git-branch-line", desc: "Import an existing project from GitHub, ZIP, or paste code and make edits" },
 ];
 
-export default function ChatPanel({ onBuildStart, onBuildEnd, onGitHubImport, onUpload, onOpenModelSettings, onCodeGenerated, onExtensionGenerated, onReactAppGenerated, conversationHistory, onConversationUpdate, conversationId, userPlan, projectContext }: ChatPanelProps) {
+export default function ChatPanel({ onBuildStart, onBuildEnd, onGitHubImport, onUpload, onOpenModelSettings, onCodeGenerated, onExtensionGenerated, onReactAppGenerated, conversationHistory, onConversationUpdate, conversationId, userPlan, projectContext, initialBuildMode }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
+  const [buildMode, setBuildMode] = useState<BuildMode>(initialBuildMode ?? "web-app");
   const [thinking, setThinking] = useState(false);
   const [thinkLabel, setThinkLabel] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [lastPrompt, setLastPrompt] = useState<string | null>(null);
-  const [buildMode, setBuildMode] = useState<BuildMode>("web-app");
   const [modeDropdownOpen, setModeDropdownOpen] = useState(false);
   const modeDropdownRef = useRef<HTMLDivElement>(null);
   const [inlineModelOpen, setInlineModelOpen] = useState(false);
@@ -166,6 +167,11 @@ export default function ChatPanel({ onBuildStart, onBuildEnd, onGitHubImport, on
   }, [conversationId, historyLoaded]);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, thinking]);
+
+  // Sync parent-provided initialBuildMode when it changes (e.g. switch to import-edit after generation)
+  useEffect(() => {
+    if (initialBuildMode) setBuildMode(initialBuildMode);
+  }, [initialBuildMode]);
 
   useEffect(() => {
     loadConfig().then((cfg) => {

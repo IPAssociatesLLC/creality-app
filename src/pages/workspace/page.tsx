@@ -23,6 +23,7 @@ import {
   type ImportedFile,
   type UserPlan,
 } from "@/utils/projects-store";
+import validateImportedFiles from "@/utils/import-validator";
 import type { ConversationMessage, BuildMode } from "@/utils/ai-api";
 import { buildSandboxHtml } from "@/utils/sandbox-bundler";
 
@@ -39,6 +40,7 @@ export default function WorkspacePage() {
   const [showUpload, setShowUpload] = useState(false);
   const [showModelSettings, setShowModelSettings] = useState(false);
   const [activePanel, setActivePanel] = useState<ActivePanel>("both");
+  const [defaultBuildMode, setDefaultBuildMode] = useState<BuildMode>("web-app");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [lastUserPrompt, setLastUserPrompt] = useState<string>("");
   const [viewingVersionCode, setViewingVersionCode] = useState<string | null>(null);
@@ -55,12 +57,12 @@ export default function WorkspacePage() {
 
   const sandboxHtml = useMemo(() => {
     if (project?.importedFiles && project.importedFiles.length > 0) {
-      const result = buildSandboxHtml(project.importedFiles);
+      const result = buildSandboxHtml(project.importedFiles, project.integrations || undefined);
       return result?.html ?? null;
     }
     if (project?.generatedCode) {
       const virtualFile = { name: "index.html", content: project.generatedCode, language: "html" };
-      const result = buildSandboxHtml([virtualFile]);
+      const result = buildSandboxHtml([virtualFile], project.integrations || undefined);
       return result?.html ?? null;
     }
     return null;
@@ -72,6 +74,13 @@ export default function WorkspacePage() {
   }, [project?.importedFiles, project?.generatedCode]);
 
   const hasSandbox = sandboxHtml !== null;
+
+  useEffect(() => {
+    if (!project) return;
+    if (project.importedFiles && project.importedFiles.length > 0) {
+      setDefaultBuildMode("import-edit");
+    }
+  }, [project?.id]);
 
 
   const idFromUrl = searchParams.get("id");
@@ -179,7 +188,7 @@ export default function WorkspacePage() {
     // Compile using in-browser builder if it has React/TypeScript files
     const hasReactOrTs = filesToDeploy.some(f => f.name.endsWith(".tsx") || f.name.endsWith(".ts"));
     if (hasReactOrTs) {
-      const bundle = buildSandboxHtml(proj.importedFiles || []);
+      const bundle = buildSandboxHtml(proj.importedFiles || [], proj.integrations || undefined);
       if (bundle?.html) {
         filesToDeploy = [
           ...filesToDeploy.filter(f => f.name !== "index.html" && f.name !== "/index.html"),
@@ -233,6 +242,13 @@ export default function WorkspacePage() {
     persistProject({ customDomain: domain });
   };
 
+  const handlePublishSuccess = async (slug: string, url: string) => {
+    if (!project) return;
+    const updated = { ...project, previewSlug: slug, customDomain: slug };
+    await saveProject(updated);
+    setProject(updated);
+  };
+
   const handleCodeGenerated = async (code: string) => {
     if (!project) return;
     const label = lastUserPrompt
@@ -278,7 +294,8 @@ export default function WorkspacePage() {
       freshProject.importedFiles = mergedFiles;
       freshProject.generatedCode = "";
       await saveProject(freshProject);
-      setProject({ ...freshProject });
+      	  setProject({ ...freshProject });
+      	  setDefaultBuildMode("import-edit");
       setViewingVersionCode(null);
       setActiveViewingFile(parsedFiles[0].name);
     } else if (freshProject.importedFiles && freshProject.importedFiles.length > 0) {
@@ -292,7 +309,8 @@ export default function WorkspacePage() {
       await saveVersion(project.id, JSON.stringify(updatedFiles), label, lastUserPrompt || "Build");
       freshProject.importedFiles = updatedFiles;
       await saveProject(freshProject);
-      setProject({ ...freshProject });
+      	  setProject({ ...freshProject });
+      	  setDefaultBuildMode("import-edit");
       autoDeployToCloudflare(freshProject);
       setViewingVersionCode(null);
       setActiveViewingFile("index.html");
@@ -303,7 +321,8 @@ export default function WorkspacePage() {
       }
       freshProject.generatedCode = code;
       await saveProject(freshProject);
-      setProject({ ...freshProject });
+      	  setProject({ ...freshProject });
+      	  setDefaultBuildMode("import-edit");
       autoDeployToCloudflare(freshProject);
       setViewingVersionCode(null);
       setActiveViewingFile("generated");
@@ -402,19 +421,63 @@ export default function WorkspacePage() {
     repo: string,
     files?: { name: string; content: string; language: string }[]
   ) => {
-    if (!project || !files || files.length === 0) return;
-    const label = `Import from GitHub: ${repo}`;
-    await saveVersion(project.id, JSON.stringify(files), label, `GitHub import: ${repo}`);
+    if (!files || files.length === 0) return;
 
-    const freshProject = await loadProject(project.id);
+    let targetProject = project;
+    if (!targetProject) {
+      if (userPlan && userPlan.tier === "free") {
+        const projectCount = await countUserProjects();
+        if (projectCount >= userPlan.projectsLimit) {
+          setProjectLimitModal(true);
+          return;
+        }
+      }
+      targetProject = await createProject("Imported Project");
+      setProject(targetProject);
+      navigate(`/workspace?id=${targetProject.id}`, { replace: true });
+      getOrCreateConversation(targetProject.id).then(setConversationId).catch(() => {});
+    }
+
+    const { files: validatedFiles, warnings } = validateImportedFiles(files);
+    if (warnings && warnings.length > 0) {
+      try { alert(`Import warnings:\n\n${warnings.slice(0,10).join('\n')}`); } catch {};
+    }
+
+    let filesToSave = validatedFiles.length > 0 ? validatedFiles : files;
+
+    // If the imported code references Supabase, add a small integration hint file
+    try {
+      const needsSupabase = filesToSave.some(f => /@supabase\/supabase-js|supabase\./i.test(f.content));
+      if (needsSupabase && !filesToSave.some(f => f.name === "CREALITY_SUPABASE_INTEGRATION.md")) {
+        filesToSave = [
+          ...filesToSave,
+          {
+            name: "CREALITY_SUPABASE_INTEGRATION.md",
+            content: `This project appears to reference Supabase. To enable database integrations inside CreAIlity, open Project Settings → Integrations and provide your Supabase URL + anon key (or connect via OAuth). Once configured, the builder will wire the Supabase client at runtime for preview and deployments. Do NOT commit secrets into the repository.`,
+            language: "markdown",
+          },
+        ];
+      }
+    } catch {}
+
+    const label = `Import from GitHub: ${repo}`;
+    await saveVersion(targetProject.id, JSON.stringify(filesToSave), label, `GitHub import: ${repo}`);
+
+    const freshProject = await loadProject(targetProject.id);
     if (!freshProject) return;
 
-    freshProject.importedFiles = files;
+    freshProject.importedFiles = filesToSave;
     freshProject.name = repo.split("/").pop() || "Imported Project";
     await saveProject(freshProject);
     setProject({ ...freshProject });
-    setActiveViewingFile(files[0].name);
+
+    const previewFile = filesToSave.find((f) => f.name === "index.html")?.name
+      || filesToSave.find((f) => f.name.endsWith("/index.html"))?.name
+      || filesToSave.find((f) => f.language === "html")?.name
+      || filesToSave[0].name;
+    setActiveViewingFile(previewFile);
     setShowGitHub(false);
+    autoDeployToCloudflare(freshProject);
   };
 
   const handleExtensionGenerated = async (
@@ -446,6 +509,7 @@ export default function WorkspacePage() {
     freshProject.importedFiles = mergedFiles;
     await saveProject(freshProject);
     setProject({ ...freshProject });
+    setDefaultBuildMode("import-edit");
     if (files.length > 0) {
       setActiveViewingFile(files[0].name);
     }
@@ -490,6 +554,7 @@ export default function WorkspacePage() {
     freshProject.name = mergedFiles.length > 0 ? (isReact ? "React App" : "Website") : freshProject.name;
     await saveProject(freshProject);
     setProject({ ...freshProject });
+    setDefaultBuildMode("import-edit");
     autoDeployToCloudflare(freshProject);
     if (files.length > 0) {
       setActiveViewingFile(files[0].name);
@@ -501,19 +566,61 @@ export default function WorkspacePage() {
     name: string,
     files?: { name: string; content: string; language: string }[]
   ) => {
-    if (!project || !files || files.length === 0) return;
-    const label = `Upload: ${name}`;
-    await saveVersion(project.id, JSON.stringify(files), label, `ZIP Upload: ${name}`);
+    if (!files || files.length === 0) return;
 
-    const freshProject = await loadProject(project.id);
+    let targetProject = project;
+    if (!targetProject) {
+      if (userPlan && userPlan.tier === "free") {
+        const projectCount = await countUserProjects();
+        if (projectCount >= userPlan.projectsLimit) {
+          setProjectLimitModal(true);
+          return;
+        }
+      }
+      targetProject = await createProject(name.replace(/\.(zip|tar\.gz)$/, ""));
+      setProject(targetProject);
+      navigate(`/workspace?id=${targetProject.id}`, { replace: true });
+      getOrCreateConversation(targetProject.id).then(setConversationId).catch(() => {});
+    }
+
+    const { files: validatedFiles, warnings } = validateImportedFiles(files);
+    if (warnings && warnings.length > 0) {
+      try { alert(`Upload warnings:\n\n${warnings.slice(0,10).join('\n')}`); } catch {};
+    }
+    let filesToSave = validatedFiles.length > 0 ? validatedFiles : files;
+
+    try {
+      const needsSupabase = filesToSave.some(f => /@supabase\/supabase-js|supabase\./i.test(f.content));
+      if (needsSupabase && !filesToSave.some(f => f.name === "CREALITY_SUPABASE_INTEGRATION.md")) {
+        filesToSave = [
+          ...filesToSave,
+          {
+            name: "CREALITY_SUPABASE_INTEGRATION.md",
+            content: `This project appears to reference Supabase. To enable database integrations inside CreAIlity, open Project Settings → Integrations and provide your Supabase URL + anon key (or connect via OAuth). Once configured, the builder will wire the Supabase client at runtime for preview and deployments. Do NOT commit secrets into the repository.`,
+            language: "markdown",
+          },
+        ];
+      }
+    } catch {}
+
+    const label = `Upload: ${name}`;
+    await saveVersion(targetProject.id, JSON.stringify(filesToSave), label, `ZIP Upload: ${name}`);
+
+    const freshProject = await loadProject(targetProject.id);
     if (!freshProject) return;
 
-    freshProject.importedFiles = files;
+    freshProject.importedFiles = filesToSave;
     freshProject.name = name.replace(/\.(zip|tar\.gz)$/, "");
     await saveProject(freshProject);
     setProject({ ...freshProject });
-    setActiveViewingFile(files[0].name);
+
+    const previewFile = filesToSave.find((f) => f.name === "index.html")?.name
+      || filesToSave.find((f) => f.name.endsWith("/index.html"))?.name
+      || filesToSave.find((f) => f.language === "html")?.name
+      || filesToSave[0].name;
+    setActiveViewingFile(previewFile);
     setShowUpload(false);
+    autoDeployToCloudflare(freshProject);
   };
 
   const previewCode = useMemo(() => {
@@ -599,6 +706,7 @@ export default function WorkspacePage() {
         onCustomDomainChange={handleCustomDomainChange}
         importedFiles={project.importedFiles}
         userPlan={userPlan}
+        onPublishSuccess={handlePublishSuccess}
       />
 
       <div className="flex-shrink-0 flex items-center justify-between px-3 py-1.5 border-b border-background-200 bg-background-100">
@@ -717,6 +825,7 @@ export default function WorkspacePage() {
               conversationId={conversationId}
               userPlan={userPlan}
               projectContext={projectContext}
+              initialBuildMode={defaultBuildMode}
             />
           </div>
         )}

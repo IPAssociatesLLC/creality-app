@@ -71,15 +71,26 @@ export async function generateCode({ config, prompt, conversationHistory, buildM
     ? IMPORT_EDIT_SYSTEM_PROMPT
     : WEB_APP_SYSTEM_PROMPT;
 
-  const userMessage = conversationHistory.length === 0
-    ? buildMode === "browser-extension"
+  // Decide whether this request should be treated as an edit to an existing
+  // project (returning only modified/new files) or as a fresh build.
+  const isEditingMode = buildMode === "import-edit" || (!!projectContext && projectContext.trim().length > 0 && conversationHistory.length > 0);
+
+  let userMessage: string;
+  if (isEditingMode) {
+    // Force the model to only return modified/new files in a JSON mapping
+    // and provide a short human-readable explanation before the JSON.
+    userMessage = `You are modifying an existing project. Apply the user's requested changes only to the existing files. Return ONLY the modified or newly added files as a single JSON object mapping relative file paths to file contents. Provide a brief explanation of what you changed BEFORE the JSON block. Do NOT include unchanged files, full project scaffolding, or unrelated commentary.\n\nUser request:\n\n${prompt}\n\nProject context (existing files):\n\n${projectContext || "(no project context provided)"}\n\nReturn output as a fenced JSON code block. Example JSON object: { "src/App.tsx": "..." }\n`;
+  } else if (conversationHistory.length === 0) {
+    // Initial build request — preserve previous behavior with clearer labels
+    userMessage = buildMode === "browser-extension"
       ? `Build me a Chrome browser extension with the following requirements:\n\n${prompt}`
       : buildMode === "react-app"
       ? `Build me a full-stack React application with the following requirements:\n\n${prompt}`
-      : buildMode === "import-edit"
-      ? `I have an existing project. Here are my requirements for changes:\n\n${prompt}`
-      : `Build me an app with the following requirements:\n\n${prompt}`
-    : prompt;
+      : `Build me an app with the following requirements:\n\n${prompt}`;
+  } else {
+    // Follow-up conversational prompt — pass through as-is (freeform edits/suggestions)
+    userMessage = prompt;
+  }
 
   onStep?.("Sending request to AI...");
 

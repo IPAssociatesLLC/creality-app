@@ -4,6 +4,8 @@ import { useAuth } from "@/hooks/use-auth";
 import type { ImportedFile, UserPlan } from "@/utils/projects-store";
 import { supabase } from "@/lib/supabase";
 import { buildSandboxHtml } from "@/utils/sandbox-bundler";
+import { getProjectIntegrations } from "@/utils/projects-store";
+import ProjectIntegrationsModal from "./ProjectIntegrationsModal";
 
 
 interface TopBarProps {
@@ -16,9 +18,10 @@ interface TopBarProps {
   onCustomDomainChange: (domain: string) => void;
   importedFiles?: ImportedFile[];
   userPlan?: UserPlan | null;
+  onPublishSuccess?: (slug: string, url: string) => void;
 }
 
-function DeployModal({ code, projectId, projectName, customDomain, onCustomDomainChange, onClose, importedFiles, userPlan }: {
+function DeployModal({ code, projectId, projectName, customDomain, onCustomDomainChange, onClose, importedFiles, userPlan, onPublishSuccess }: {
   code: string;
   projectId: string | null;
   projectName: string;
@@ -27,6 +30,7 @@ function DeployModal({ code, projectId, projectName, customDomain, onCustomDomai
   onClose: () => void;
   importedFiles?: ImportedFile[];
   userPlan?: UserPlan | null;
+  onPublishSuccess?: (slug: string, url: string) => void;
 }) {
   const [deploying, setDeploying] = useState(false);
   const [done, setDone] = useState<{ url: string } | null>(null);
@@ -95,10 +99,13 @@ function DeployModal({ code, projectId, projectName, customDomain, onCustomDomai
         ? importedFiles
         : [{ name: "index.html", content: code, language: "html" }];
 
+      // Load saved integrations for this project (if any)
+      const integrations = projectId ? await getProjectIntegrations(projectId) : null;
+
       // If project has React/TypeScript files, compile using in-browser builder
       const hasReactOrTs = files.some(f => f.name.endsWith(".tsx") || f.name.endsWith(".ts"));
       if (hasReactOrTs) {
-        const bundle = buildSandboxHtml(files);
+        const bundle = buildSandboxHtml(files, integrations || undefined);
         if (bundle?.html) {
           files = [
             ...files.filter(f => f.name !== "index.html" && f.name !== "/index.html"),
@@ -111,12 +118,17 @@ function DeployModal({ code, projectId, projectName, customDomain, onCustomDomai
         body: {
           projectId,
           files: files.map(f => ({ name: f.name, content: f.content })),
+          integrations: integrations || null,
           slug: finalSlug,
           projectName,
         },
       });
       if (deployErr) throw deployErr;
-      setDone({ url: deployData.directUrl || deployData.url || fullUrl });
+      const publishedUrl = deployData.directUrl || deployData.url || fullUrl;
+      setDone({ url: publishedUrl });
+      if (onPublishSuccess && deployData.slug) {
+        onPublishSuccess(deployData.slug, publishedUrl);
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Publish failed — please try again";
       setDeployError(msg);
@@ -264,7 +276,7 @@ function DeployModal({ code, projectId, projectName, customDomain, onCustomDomai
   );
 }
 
-export default function TopBar({ projectName, onProjectNameChange, isBuilding, generatedCode, projectId, customDomain, onCustomDomainChange, importedFiles, userPlan }: TopBarProps) {
+export default function TopBar({ projectName, onProjectNameChange, isBuilding, generatedCode, projectId, customDomain, onCustomDomainChange, importedFiles, userPlan, onPublishSuccess }: TopBarProps) {
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
   const [editing, setEditing] = useState(false);
@@ -273,6 +285,7 @@ export default function TopBar({ projectName, onProjectNameChange, isBuilding, g
   const [showDeploy, setShowDeploy] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showIntegrations, setShowIntegrations] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
 
   const slug = projectName.replace(/\s+/g, "-").toLowerCase().replace(/[^a-z0-9-]/g, "");
@@ -345,6 +358,7 @@ export default function TopBar({ projectName, onProjectNameChange, isBuilding, g
                         <button onClick={() => { setShowUserMenu(false); navigate("/admin"); }} className="w-full flex items-center gap-2 text-xs text-foreground-600 hover:text-foreground-800 hover:bg-background-200/60 rounded-lg px-3 py-2 transition-colors cursor-pointer"><div className="w-4 h-4 flex items-center justify-center"><i className="ri-shield-keyhole-line text-sm" /></div>Admin Panel</button>
                       )}
                       <button onClick={() => { setShowUserMenu(false); navigate("/settings"); }} className="w-full flex items-center gap-2 text-xs text-foreground-600 hover:text-foreground-800 hover:bg-background-200/60 rounded-lg px-3 py-2 transition-colors cursor-pointer"><div className="w-4 h-4 flex items-center justify-center"><i className="ri-settings-3-line text-sm" /></div>Settings & API Keys</button>
+                      <button onClick={() => { setShowUserMenu(false); setShowIntegrations(true); }} className="w-full flex items-center gap-2 text-xs text-foreground-600 hover:text-foreground-800 hover:bg-background-200/60 rounded-lg px-3 py-2 transition-colors cursor-pointer"><div className="w-4 h-4 flex items-center justify-center"><i className="ri-plug-line text-sm" /></div>Project Integrations</button>
                       <button onClick={handleLogout} className="w-full flex items-center gap-2 text-xs text-foreground-600 hover:text-amber-500 hover:bg-amber-500/10 rounded-lg px-3 py-2 transition-colors cursor-pointer"><div className="w-4 h-4 flex items-center justify-center"><i className="ri-logout-box-line text-sm" /></div>Sign out</button>
                     </div>
                   </div>
@@ -356,7 +370,10 @@ export default function TopBar({ projectName, onProjectNameChange, isBuilding, g
       </header>
 
       {showDeploy && (generatedCode || (importedFiles && importedFiles.length > 0)) && (
-        <DeployModal code={generatedCode || ""} projectId={projectId} projectName={projectName} customDomain={customDomain} onCustomDomainChange={onCustomDomainChange} onClose={() => setShowDeploy(false)} importedFiles={importedFiles} userPlan={userPlan} />
+        <DeployModal code={generatedCode || ""} projectId={projectId} projectName={projectName} customDomain={customDomain} onCustomDomainChange={onCustomDomainChange} onClose={() => setShowDeploy(false)} importedFiles={importedFiles} userPlan={userPlan} onPublishSuccess={onPublishSuccess} />
+      )}
+      {showIntegrations && projectId && (
+        <ProjectIntegrationsModal projectId={projectId} onClose={() => setShowIntegrations(false)} />
       )}
     </>
   );

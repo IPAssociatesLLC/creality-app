@@ -43,15 +43,39 @@ function parseRepoUrl(url: string): { owner: string; repo: string; branch: strin
   return { owner, repo, branch: "main" };
 }
 
-async function fetchRepoContents(owner: string, repo: string, branch: string): Promise<GitHubFile[]> {
-  const apiUrl = `https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`;
-
-  const res = await fetch(apiUrl, {
-    headers: {
+async function fetchRepoContents(owner: string, repo: string, branch: string, token?: string): Promise<GitHubFile[]> {
+  // GitHub's git/trees endpoint expects a tree SHA or a branch name/ref.
+  // Some repos use 'master' instead of 'main' — if the initial request
+  // 404s, fetch the repo metadata to determine the actual default branch
+  // and retry.
+    const makeTreeRequest = async (ref: string) => {
+    const apiUrl = `https://api.github.com/repos/${owner}/${repo}/git/trees/${ref}?recursive=1`;
+    const headers: Record<string, string> = {
       Accept: "application/vnd.github+json",
       "X-GitHub-Api-Version": "2022-11-28",
-    },
-  });
+    };
+    if (token && token.trim()) headers.Authorization = `token ${token.trim()}`;
+    const res = await fetch(apiUrl, { headers });
+    return res;
+  };
+
+  let res = await makeTreeRequest(branch);
+
+  if (!res.ok && res.status === 404) {
+    // Try to discover the repo's default branch and retry
+    try {
+      const repoRes = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
+        headers: { Accept: "application/vnd.github+json" },
+      });
+      if (repoRes.ok) {
+        const repoData = await repoRes.json();
+        const defaultBranch = repoData.default_branch || branch;
+        res = await makeTreeRequest(defaultBranch);
+      }
+    } catch (err) {
+      // fall through to error handling below
+    }
+  }
 
   if (!res.ok) {
     const err = await res.text();
@@ -83,7 +107,9 @@ async function fetchRepoContents(owner: string, repo: string, branch: string): P
       batch.map(async (item: { path: string }) => {
         const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${item.path}`;
         try {
-          const contentRes = await fetch(rawUrl);
+          const rawHeaders: Record<string, string> = {};
+          if (token && token.trim()) rawHeaders.Authorization = `token ${token.trim()}`;
+          const contentRes = await fetch(rawUrl, { headers: rawHeaders });
           if (!contentRes.ok) return null;
           const content = await contentRes.text();
           return {
@@ -112,6 +138,7 @@ export default function GitHubModal({ onClose, onImport }: GitHubModalProps) {
   const [fetchedFiles, setFetchedFiles] = useState<GitHubFile[]>([]);
   const [repoInfo, setRepoInfo] = useState<{ owner: string; repo: string; branch: string } | null>(null);
   const [importDone, setImportDone] = useState(false);
+  const [pat, setPat] = useState<string>("");
 
   const handleImport = async () => {
     const url = repoUrl.trim();
@@ -129,7 +156,7 @@ export default function GitHubModal({ onClose, onImport }: GitHubModalProps) {
       }
 
       setRepoInfo(parsed);
-      const files = await fetchRepoContents(parsed.owner, parsed.repo, parsed.branch);
+      const files = await fetchRepoContents(parsed.owner, parsed.repo, parsed.branch, pat);
       setFetchedFiles(files);
       setImportDone(true);
     } catch (err: unknown) {
@@ -193,6 +220,19 @@ export default function GitHubModal({ onClose, onImport }: GitHubModalProps) {
                 )}
               </button>
             </div>
+          </div>
+          <div className="flex flex-col gap-2">
+            <label className="text-xs font-medium text-foreground-500">Personal Access Token (optional)</label>
+            <div className="flex gap-2">
+              <input
+                type="password"
+                value={pat}
+                onChange={e => setPat(e.target.value)}
+                placeholder="GitHub Personal Access Token (for private repos / higher rate limits)"
+                className="flex-1 text-sm bg-transparent outline-none text-foreground-800 placeholder-foreground-600 font-mono border border-background-300/60 rounded-xl px-3 py-2"
+              />
+            </div>
+            <p className="text-[10px] text-foreground-500">Tokens are used client-side only; do not paste tokens you do not control. You can revoke tokens anytime in GitHub settings.</p>
           </div>
 
           {error && (

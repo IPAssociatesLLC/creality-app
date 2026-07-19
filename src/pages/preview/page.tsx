@@ -20,6 +20,7 @@ export default function PreviewPage() {
           createdAt: new Date(data.created_at).getTime(), updatedAt: new Date(data.updated_at).getTime(),
           generatedCode: data.generated_code, conversationHistory: data.conversation_history || [],
           previewSlug: data.preview_slug || data.id, customDomain: data.custom_domain || undefined,
+          integrations: data.integrations || undefined,
           versions: [], activeVersionId: null, importedFiles: (data.imported_files as ImportedFile[]) || [],
         };
         setProject(p);
@@ -31,7 +32,7 @@ export default function PreviewPage() {
 
   const iframeSrc = useMemo(() => {
     if (project?.importedFiles && project.importedFiles.length > 0 && !project.generatedCode) {
-      const sandbox = buildSandboxHtml(project.importedFiles);
+      const sandbox = buildSandboxHtml(project.importedFiles, project.integrations || undefined);
       if (sandbox) { const blob = new Blob([sandbox.html], { type: "text/html;charset=utf-8" }); return URL.createObjectURL(blob); }
     }
     if (!project?.generatedCode) return null;
